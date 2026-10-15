@@ -38,7 +38,15 @@ jobs:
 
       - name: Read app version
         run: |
-          VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);/\1/p' CarrierLock.xcodeproj/project.pbxproj | head -n 1)
+          VERSION=$(awk '
+            /<key>MARKETING_VERSION<\/key>/ {
+              getline
+              gsub(/.*<string>/, "")
+              gsub(/<\/string>.*/, "")
+              print
+              exit
+            }
+          ' CarrierLock.xcodeproj/project.pbxproj)
           test -n "$VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
