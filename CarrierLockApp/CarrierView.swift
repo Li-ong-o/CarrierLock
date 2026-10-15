@@ -6,6 +6,7 @@ struct CarrierLockRootView: View {
     @State private var showingAbout = false
     @State private var showingAirliftSetup = false
     @State private var showingBundlePicker = false
+    @State private var editingIMSI: String?
     @State private var showingStartupGate = true
     @State private var confirmingLock = false
 
@@ -65,7 +66,23 @@ struct CarrierLockRootView: View {
             CarrierLockAirliftSetupView()
         }
         .sheet(isPresented: $showingBundlePicker) {
-            CarrierBundlePickerSheet(bundleName: $service.bundleName)
+            CarrierBundlePickerSheet(
+                bundleName: Binding(
+                    get: {
+                        if let imsi = editingIMSI {
+                            return service.bundle(forIMSI: imsi)
+                        }
+                        return service.bundleName
+                    },
+                    set: { value in
+                        if let imsi = editingIMSI {
+                            service.customBundlesByIMSI[imsi] = value
+                        } else {
+                            service.bundleName = value
+                        }
+                    }
+                )
+            )
                 .presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
@@ -219,6 +236,40 @@ struct CarrierLockRootView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            if !service.selectedIMSIs.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("IMSI 配置预览", systemImage: "list.bullet")
+                        .font(.headline)
+
+                    ForEach(service.selectedIMSIs, id: \.self) { imsi in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(imsi)
+                                    .font(.callout.monospaced())
+                                Text(service.bundle(forIMSI: imsi))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                editingIMSI = imsi
+                                showingBundlePicker = true
+                            } label: {
+                                Text("修改")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；无法识别或特殊场景可使用自定义 bundle 覆盖。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+            }
         }
         .padding(16)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
@@ -304,7 +355,7 @@ struct CarrierLockRootView: View {
         switch service.mode {
         case .idle: "未锁定"
         case .locking: "锁定中…"
-        case .locked(let bundle, let imsis): "Locked: \(bundle) · \(imsis.count) IMSI"
+        case .locked(let links): "Locked: \(links.count) IMSI"
         case .failed: "失败"
         }
     }
@@ -341,8 +392,11 @@ struct CarrierLockRootView: View {
     }
 
     private var imsiDetail: String {
-        if case .locked(_, let imsis) = service.mode {
-            return imsis.joined(separator: "、")
+        if case .locked(let links) = service.mode {
+            return links
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key) → \($0.value)" }
+                .joined(separator: "、")
         }
         return ""
     }
