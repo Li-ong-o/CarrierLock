@@ -301,11 +301,13 @@ struct CarrierLockRootView: View {
     private var modeDetail: String {
         switch service.mode {
         case .idle:
-            "从日志捕获 IMSI 后勾选并锁定。"
+            service.selectedIMSIs.isEmpty
+                ? "尚未选择 IMSI。请先开始监听。"
+                : "已选择 \(service.selectedIMSIs.count) 个 IMSI，确认后可锁定。"
         case .locking:
             "正在写入运营商配置链接。"
         case .locked:
-            String(format: "已生效：%@", imsiDetail)
+            "上次写入已生效。请勿把它当作当前选择。"
         case .failed:
             "上次操作失败，请检查错误后重试。"
         }
