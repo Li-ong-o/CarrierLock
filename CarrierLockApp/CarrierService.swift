@@ -33,13 +33,14 @@ final class CarrierService: ObservableObject {
     enum LockMode: Equatable {
         case idle
         case locking
-        case locked(bundle: String, imsi: String)
+        case locked(bundle: String, imsis: [String])
         case failed(String)
     }
 
     @Published private(set) var mode: LockMode = .idle
     @Published var bundleName: String = "CMCC_cn"
     @Published var imsi: String = ""
+    @Published var candidateIMSIsText: String = ""
     @Published private(set) var busyMessage: String?
     @Published private(set) var needsAirliftSetup = false
     @Published private(set) var detection: CarrierDetection?
@@ -59,6 +60,21 @@ final class CarrierService: ObservableObject {
     var monitoredBundleName: String {
         if case .locked(let bundle, _) = mode { return bundle }
         return bundleName
+    }
+
+    var selectedIMSIs: [String] {
+        var values: [String] = []
+        values.append(contentsOf: imsi.split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        values.append(contentsOf: candidateIMSIsText.split(whereSeparator: { $0.isNewline || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+
+        var seen = Set<String>()
+        return values.compactMap { value in
+            guard !value.isEmpty, !seen.contains(value) else { return nil }
+            seen.insert(value)
+            return value
+        }
     }
 
     func lock() async {
@@ -102,6 +118,31 @@ final class CarrierService: ObservableObject {
         }
     }
 
+    func toggleDetectedIMSI(_ value: String) {
+        if imsi == value {
+            imsi = ""
+            return
+        }
+
+        var candidates = candidateIMSIsText
+            .split(whereSeparator: { $0.isNewline || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        if let index = candidates.firstIndex(of: value) {
+            candidates.remove(at: index)
+            candidateIMSIsText = candidates.joined(separator: "\n")
+            return
+        }
+
+        candidates.append(value)
+        candidateIMSIsText = candidates.joined(separator: "\n")
+
+        if let mccMnc = CarrierDetectionService.prefixCandidate(for: value),
+           let bundle = CarrierDetectionService.bundle(for: mccMnc) {
+            bundleName = bundle
+        }
+    }
+
     private func run() async throws {
         guard SystemCompatibility.isSupported else {
             throw CarrierError.unsupported
@@ -113,9 +154,14 @@ final class CarrierService: ObservableObject {
             throw CarrierError.pairingRequired
         }
 
-        let imsi = imsi.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard imsi.count == 15, imsi.allSatisfy({ $0.isNumber }) else {
-            throw CarrierError.invalidIMSI(imsi.isEmpty ? "(empty)" : imsi)
+        let imsis = selectedIMSIs
+        guard !imsis.isEmpty else {
+            throw CarrierError.invalidIMSI("(empty)")
+        }
+
+        let invalidIMSIs = imsis.filter { $0.count != 15 || !$0.allSatisfy(\.isNumber) }
+        guard invalidIMSIs.isEmpty else {
+            throw CarrierError.invalidIMSI(invalidIMSIs.joined(separator: ", "))
         }
 
         let bundle = bundleName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,12 +174,14 @@ final class CarrierService: ObservableObject {
         defer { busyMessage = nil }
 
         let linkTarget = "/System/Library/Carrier Bundles/iPhone/\(bundle).bundle"
-        let payload = try buildSymlinkPayload(name: imsi, target: linkTarget)
+        let payloads = try imsis.map { imsi in
+            try buildSymlinkPayload(name: imsi, target: linkTarget)
+        }
 
-        busyMessage = String(localized: "Writing carrier bundle overlay…")
-        try await CarrierTransport.shared.write(files: [payload], pairingPath: pairingPath)
+        busyMessage = String(format: String(localized: "Writing %d carrier bundle overlay links…"), payloads.count)
+        try await CarrierTransport.shared.write(files: payloads, pairingPath: pairingPath)
 
-        mode = .locked(bundle: bundle, imsi: imsi)
+        mode = .locked(bundle: bundle, imsis: imsis)
     }
 
     /// Builds a symlink payload; the transport stages the real link so

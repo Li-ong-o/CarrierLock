@@ -2,6 +2,14 @@
 
 All notable changes to **CarrierLock** are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Multi-IMSI carrier overlay locking. One operation can write overlay links for
+  a real SIM IMSI, adapter-reported IMSIs, both dual-SIM lines, and additional
+  candidates.
+
 ## [1.0.1] - 2026-10-15
 
 ### Added

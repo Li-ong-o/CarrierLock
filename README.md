@@ -9,13 +9,16 @@ CarrierLock is an iOS utility for users who maintain their own carrier configura
 
 - On-device guidance for pairing and the LocalDevVPN loopback connection.
 - Log listening to capture IMSI candidates from CommCenter events.
+- Multi-IMSI locking for real SIM IMSIs, adapter-reported IMSIs, and dual-SIM lines.
 - Carrier-bundle selection, including a custom bundle option.
 - IMSI confirmation before writing the overlay link.
 - English and Simplified Chinese UI.
 
 ## How it works
 
-CarrierLock listens for CommCenter bundle-selection events, helps you identify the IMSI being used, and writes an overlay link such as `<IMSI> -> /System/Library/Carrier Bundles/iPhone/<Bundle>.bundle` through Airlift. When CommCenter scans carrier bundles again, it matches the local overlay first and loads the selected bundle.
+CarrierLock listens for CommCenter bundle-selection events, helps you identify the IMSI being used, and writes an overlay link such as `<IMSI> -> /System/Library/Carrier Bundles/iPhone/<Bundle>.bundle` through Airlift. Multi-IMSI mode writes several candidate links in one operation. When CommCenter scans carrier bundles again, it matches the local overlay first and loads the selected bundle.
+
+Multi-IMSI locking can cover dual-SIM lines and adapters that temporarily report different IMSIs. It cannot prevent an adapter from switching IMSIs, repair activation state, or change baseband capabilities.
 
 ## Requirements
 

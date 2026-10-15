@@ -9,13 +9,16 @@ CarrierLock 是一款面向个人设备维护场景的 iOS 工具。它通过 Ai
 
 - 提供配对文件与 LocalDevVPN 回环连接的设备端引导。
 - 监听 CommCenter 日志并捕获 IMSI 候选值。
+- 支持一次锁定多个 IMSI 候选值，包括真实 SIM、卡贴上报值和双卡 IMSI。
 - 支持选择运营商 bundle，也支持手动输入自定义 bundle 名称。
 - 写入 Overlay 链接前强制确认 IMSI，降低锁错 SIM 的风险。
 - 支持简体中文界面。
 
 ## 工作原理
 
-CarrierLock 会监听 CommCenter 的 bundle 选择事件，帮助确认当前使用的 IMSI，然后通过 Airlift 写入形如 `<IMSI> -> /System/Library/Carrier Bundles/iPhone/<Bundle>.bundle` 的 Overlay 链接。CommCenter 再次扫描运营商配置时会优先匹配本地 Overlay，并加载所选 bundle。
+CarrierLock 会监听 CommCenter 的 bundle 选择事件，帮助确认当前使用的 IMSI，然后通过 Airlift 写入形如 `<IMSI> -> /System/Library/Carrier Bundles/iPhone/<Bundle>.bundle` 的 Overlay 链接。多 IMSI 模式会一次写入多个候选链接。CommCenter 再次扫描运营商配置时会优先匹配本地 Overlay，并加载所选 bundle。
+
+多 IMSI 锁定可以覆盖双卡、卡贴临时切换 IMSI 等场景，但它不能阻止卡贴主动切换 IMSI，也不能修复激活票据或修改基带能力。
 
 ## 系统要求
 

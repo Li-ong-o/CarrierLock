@@ -131,14 +131,14 @@ struct CarrierMonitorView: View {
 
             ForEach(Array(monitor.imsiCandidates).sorted(), id: \.self) { candidate in
                 Button {
-                    service.applyDetectedIMSI(candidate)
+                    service.toggleDetectedIMSI(candidate)
                 } label: {
                     HStack {
                         Text(candidate)
                             .font(.callout.monospaced())
                             .textSelection(.enabled)
                         Spacer()
-                        if service.imsi == candidate {
+                        if service.selectedIMSIs.contains(candidate) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.teal)
                         }
@@ -147,7 +147,7 @@ struct CarrierMonitorView: View {
                 .buttonStyle(.bordered)
             }
 
-            Text("点一下即可填入并自动匹配 bundle。请先与电脑核对 IMSI 是否为本机 SIM 的 IMSI；优先选择真实运营商 IMSI，例如中国移动 46007 开头的这一条。卡贴伪装 IMSI（如 46000 开头）通常不是要锁定的目标，误锁后可能导致信号异常或反复触发激活。")
+            Text("点一下即可加入多 IMSI 锁定列表，并自动匹配 bundle。可以同时勾选真实 IMSI、卡贴上报 IMSI 和双卡 IMSI。仍建议优先核对真实 IMSI；误选明显错误的 IMSI 可能导致配置匹配异常。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

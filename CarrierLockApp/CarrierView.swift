@@ -165,10 +165,33 @@ struct CarrierLockRootView: View {
                 TextField("IMSI（15 位）", text: $service.imsi)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
-                Label("IMSI 会在开始监听并刷新 SIM 信号后自动填入，也可以手动输入。", systemImage: "waveform")
+                Label("主 IMSI 会在开始监听并刷新 SIM 信号后自动填入，也可以手动输入。", systemImage: "waveform")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextEditor(text: $service.candidateIMSIsText)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 88)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+                    .overlay(alignment: .topLeading) {
+                        Text("候选 IMSI（每行一个）")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .allowsHitTesting(false)
+                            .opacity(service.candidateIMSIsText.isEmpty ? 1 : 0)
+                    }
+                    .accessibilityLabel("候选 IMSI")
+
+                Label("可填写真实 IMSI、卡贴上报 IMSI、双卡 IMSI 等多个候选值。写入时会自动去重。", systemImage: "list.bullet.rectangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Button {
                     showingBundlePicker = true
@@ -281,7 +304,7 @@ struct CarrierLockRootView: View {
         switch service.mode {
         case .idle: "未锁定"
         case .locking: "锁定中…"
-        case .locked(let bundle, let imsi): "Locked: \(bundle) · \(imsi)"
+        case .locked(let bundle, let imsis): "Locked: \(bundle) · \(imsis.count) IMSI"
         case .failed: "失败"
         }
     }
@@ -289,11 +312,11 @@ struct CarrierLockRootView: View {
     private var modeDetail: String {
         switch service.mode {
         case .idle:
-            "输入或自动捕获 IMSI，选择 bundle 后锁定。"
+            "输入或自动捕获 IMSI，选择 bundle 后锁定。可同时锁定多个候选 IMSI。"
         case .locking:
             "正在写入运营商配置链接。"
         case .locked:
-            "该 IMSI 的 Overlay 链接已生效。"
+            String(format: "已生效：%@", imsiDetail)
         case .failed:
             "上次操作失败，请检查错误后重试。"
         }
@@ -315,6 +338,13 @@ struct CarrierLockRootView: View {
         case .locked: .teal
         case .failed: .red
         }
+    }
+
+    private var imsiDetail: String {
+        if case .locked(_, let imsis) = service.mode {
+            return imsis.joined(separator: "、")
+        }
+        return ""
     }
 }
 
