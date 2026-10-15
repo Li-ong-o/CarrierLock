@@ -86,7 +86,7 @@ with open(sys.argv[1], 'rb') as file:
     info = plistlib.load(file)
 assert info['CFBundleShortVersionString'] == sys.argv[2], 'Archive version mismatch'
 assert '_remotepairing-pairable-host._tcp' in info['NSBonjourServices']
-assert '_aircardprobe._tcp' in info['NSBonjourServices']
+assert '_carrierlockprobe._tcp' in info['NSBonjourServices']
 assert info['NSLocalNetworkUsageDescription']
 assert 'audio' in info['UIBackgroundModes']
 print('Archive version, Grappa export and Airlift permissions verified')
