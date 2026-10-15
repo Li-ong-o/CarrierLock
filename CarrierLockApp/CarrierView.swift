@@ -173,11 +173,11 @@ struct CarrierLockRootView: View {
 
     private var lockForm: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("已选 IMSI", systemImage: "checkmark.circle")
-                .font(.headline)
-
             if !service.selectedIMSIs.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
+                    Label("已选 IMSI", systemImage: "checkmark.circle")
+                        .font(.headline)
+
                     ForEach(service.selectedIMSIs, id: \.self) { imsi in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -204,7 +204,7 @@ struct CarrierLockRootView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Label("暂无已选 IMSI。请先开始监听并刷新 SIM 信号。", systemImage: "clock")
+                Label("暂无已选 IMSI，请先开始监听并开关飞行模式", systemImage: "clock")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
