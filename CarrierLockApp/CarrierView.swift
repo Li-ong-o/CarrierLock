@@ -14,6 +14,11 @@ struct CarrierLockRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
+                    Text("CarrierLock")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityAddTraits(.isHeader)
+
                     header
                     statusCard
 
@@ -34,7 +39,6 @@ struct CarrierLockRootView: View {
                 .padding(20)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("CarrierLock")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
