@@ -131,12 +131,30 @@ struct CarrierMonitorView: View {
 
             ForEach(Array(monitor.imsiCandidates).sorted(), id: \.self) { candidate in
                 Button {
-                    service.toggleDetectedIMSI(candidate)
+                    if service.selectedIMSIs.contains(candidate) {
+                        service.toggleDetectedIMSI(candidate)
+                    } else {
+                        service.selectDetectedIMSI(candidate)
+                    }
                 } label: {
                     HStack {
-                        Text(candidate)
-                            .font(.callout.monospaced())
-                            .textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(candidate)
+                                    .font(.callout.monospaced())
+                                if isLikelyRealIMSI(candidate) {
+                                    Text("疑似真实 IMSI")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.teal.opacity(0.14), in: .capsule)
+                                        .foregroundStyle(.teal)
+                                }
+                            }
+                            Text(service.bundle(forIMSI: candidate))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
                         if service.selectedIMSIs.contains(candidate) {
                             Image(systemName: "checkmark.circle.fill")
@@ -274,5 +292,18 @@ struct CarrierMonitorView: View {
         case .matched: .green
         case .mismatch: .orange
         }
+    }
+
+    private func isLikelyRealIMSI(_ imsi: String) -> Bool {
+        guard let prefix = CarrierDetectionService.prefixCandidate(for: imsi),
+              CarrierDetectionService.bundle(for: prefix) != nil else { return false }
+
+        // Adapter-generated identities often contain recognizable repetition.
+        let middle = imsi.dropFirst(prefix.count).dropLast()
+        guard middle.count >= 6 else { return false }
+        let digits = middle.compactMap { $0.wholeNumberValue }
+        let hasRun = zip(digits, digits.dropFirst()).contains { $0 == $1 }
+        let hasSequence = zip(digits, digits.dropFirst()).contains { $1 == $0 + 1 }
+        return !hasRun && !hasSequence
     }
 }

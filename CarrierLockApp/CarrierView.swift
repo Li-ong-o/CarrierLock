@@ -69,17 +69,12 @@ struct CarrierLockRootView: View {
             CarrierBundlePickerSheet(
                 bundleName: Binding(
                     get: {
-                        if let imsi = editingIMSI {
-                            return service.bundle(forIMSI: imsi)
-                        }
-                        return service.bundleName
+                        guard let imsi = editingIMSI else { return service.bundleName }
+                        return service.bundle(forIMSI: imsi)
                     },
                     set: { value in
-                        if let imsi = editingIMSI {
-                            service.customBundlesByIMSI[imsi] = value
-                        } else {
-                            service.bundleName = value
-                        }
+                        guard let imsi = editingIMSI else { return }
+                        service.customBundlesByIMSI[imsi] = value
                     }
                 )
             )
@@ -177,71 +172,12 @@ struct CarrierLockRootView: View {
     }
 
     private var lockForm: some View {
-        VStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("IMSI（15 位）", text: $service.imsi)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                Label("主 IMSI 会在开始监听并刷新 SIM 信号后自动填入，也可以手动输入。", systemImage: "waveform")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                TextEditor(text: $service.candidateIMSIsText)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 88)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
-                    .overlay(alignment: .topLeading) {
-                        Text("候选 IMSI（每行一个）")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .allowsHitTesting(false)
-                            .opacity(service.candidateIMSIsText.isEmpty ? 1 : 0)
-                    }
-                    .accessibilityLabel("候选 IMSI")
-
-                Label("可填写真实 IMSI、卡贴上报 IMSI、双卡 IMSI 等多个候选值。写入时会自动去重。", systemImage: "list.bullet.rectangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    showingBundlePicker = true
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("运营商配置")
-                                .foregroundStyle(.secondary)
-                                .font(.caption)
-                            Text(service.bundleName.isEmpty ? "选择运营商配置" : service.bundleName)
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(service.bundleName.isEmpty ? .secondary : .primary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                Text("Bundle 名称必须对应 /System/Library/Carrier Bundles/iPhone 下的文件夹。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            Label("已选 IMSI", systemImage: "checkmark.circle")
+                .font(.headline)
 
             if !service.selectedIMSIs.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("IMSI 配置预览", systemImage: "list.bullet")
-                        .font(.headline)
-
                     ForEach(service.selectedIMSIs, id: \.self) { imsi in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -267,8 +203,10 @@ struct CarrierLockRootView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                .padding(12)
-                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+            } else {
+                Label("暂无已选 IMSI。请先开始监听并刷新 SIM 信号。", systemImage: "clock")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
@@ -363,7 +301,7 @@ struct CarrierLockRootView: View {
     private var modeDetail: String {
         switch service.mode {
         case .idle:
-            "输入或自动捕获 IMSI，选择 bundle 后锁定。可同时锁定多个候选 IMSI。"
+            "从日志捕获 IMSI 后勾选并锁定。"
         case .locking:
             "正在写入运营商配置链接。"
         case .locked:

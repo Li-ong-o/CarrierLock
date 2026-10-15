@@ -38,10 +38,9 @@ final class CarrierService: ObservableObject {
     }
 
     @Published private(set) var mode: LockMode = .idle
-    @Published var bundleName: String = "CMCC_cn"
+    @Published private(set) var bundleName: String = "CMCC_cn"
     @Published var customBundlesByIMSI: [String: String] = [:]
-    @Published var imsi: String = ""
-    @Published var candidateIMSIsText: String = ""
+    @Published private(set) var detectedIMSIs: [String] = []
     @Published private(set) var busyMessage: String?
     @Published private(set) var needsAirliftSetup = false
     @Published private(set) var detection: CarrierDetection?
@@ -66,18 +65,7 @@ final class CarrierService: ObservableObject {
     }
 
     var selectedIMSIs: [String] {
-        var values: [String] = []
-        values.append(contentsOf: imsi.split(whereSeparator: { $0.isNewline })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-        values.append(contentsOf: candidateIMSIsText.split(whereSeparator: { $0.isNewline || $0 == "," || $0 == ";" })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-
-        var seen = Set<String>()
-        return values.compactMap { value in
-            guard !value.isEmpty, !seen.contains(value) else { return nil }
-            seen.insert(value)
-            return value
-        }
+        detectedIMSIs
     }
 
     func bundle(forIMSI imsi: String) -> String {
@@ -118,41 +106,16 @@ final class CarrierService: ObservableObject {
         }
     }
 
-    func applyDetectedIMSI(_ value: String) {
-        imsi = value
-        if let mccMnc = CarrierDetectionService.prefixCandidate(for: value) {
-            if let bundle = CarrierDetectionService.bundle(for: mccMnc) {
-                bundleName = bundle
-            } else {
-                detection = CarrierDetection(
-                    imsi: value,
-                    mcc: String(value.prefix(3)),
-                    mnc: String(value.dropFirst(3).prefix(mccMnc.count - 3)),
-                    bundleName: bundleName,
-                    source: .carrierInfo
-                )
-            }
-        }
+    func toggleDetectedIMSI(_ value: String) {
+        guard let index = detectedIMSIs.firstIndex(of: value) else { return }
+        detectedIMSIs.remove(at: index)
     }
 
-    func toggleDetectedIMSI(_ value: String) {
-        if imsi == value {
-            imsi = ""
-            return
-        }
-
-        var candidates = candidateIMSIsText
-            .split(whereSeparator: { $0.isNewline || $0 == "," || $0 == ";" })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-        if let index = candidates.firstIndex(of: value) {
-            candidates.remove(at: index)
-            candidateIMSIsText = candidates.joined(separator: "\n")
-            return
-        }
-
-        candidates.append(value)
-        candidateIMSIsText = candidates.joined(separator: "\n")
+    func selectDetectedIMSI(_ value: String) {
+        guard value.count == 15, value.allSatisfy(\.isNumber),
+              !detectedIMSIs.contains(value) else { return }
+        detectedIMSIs.append(value)
+        detectedIMSIs.sort()
     }
 
     private func run() async throws {
