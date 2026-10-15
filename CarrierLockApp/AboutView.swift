@@ -1,0 +1,109 @@
+import SwiftUI
+
+struct CarrierLockAboutView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(spacing: 12) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundStyle(.teal)
+                            .frame(width: 78, height: 78)
+                            .background(.teal.opacity(0.12), in: .circle)
+
+                        Text("CarrierLock")
+                            .font(.title2.bold())
+                        Text(versionText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+
+                Section("简介") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("CarrierLock 通过 Airlift 将运营商配置的符号链接写入 Overlay 目录，让 CommCenter 直接命中本地配置，减少卡贴场景下的重新激活。")
+                        Text("支持系统：\(SystemCompatibility.supportedRangeDescription)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("跳激活的原理") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("卡贴会修改或伪装 SIM 上报给系统的网络标识。CommCenter 在重启、基带复位或 SIM 重新注册后，需要根据 IMSI/ICCID 重新选择运营商配置；当匹配结果不稳定或需要重新走激活流程时，系统会弹出“需要激活”。")
+                        Text("夜间待机、长时间充电、Wi-Fi 环境下更容易发生，是因为系统会进行维护任务、网络切换或基带复位，从而触发重新匹配。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("锁定 IPCC 的目的") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("锁定是在 Overlay 中为指定 IMSI 建立到系统运营商配置的链接。匹配成功后，CommCenter 优先使用本地 Overlay 配置，减少联网匹配和重新激活。")
+                        Text("适合用于减少日常使用、重启、基带复位后的配置抖动。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("无法实现的功能") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("不能解锁网络锁，也不能绕过运营商激活策略。", systemImage: "xmark.circle")
+                        Label("不能阻止卡贴主动切换 IMSI 或改变上报标识。", systemImage: "xmark.circle")
+                        Label("不能阻止 MEP 卡贴在开机时弹出的激活引导；弹出后请及时完成激活，否则可能出现屏幕方向锁定、无法接收消息通知等问题。", systemImage: "xmark.circle")
+                        Label("不能修改系统只读分区、基带配置或需要 root 权限的文件。", systemImage: "xmark.circle")
+                        Label("不能保证在更换 SIM、系统更新或 Airlift 失效后继续可用。", systemImage: "xmark.circle")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
+                Section("法律与免责声明") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("本软件仅供个人学习、研究和维护本人拥有或已获授权的设备使用。下载、安装或使用本软件均属于个人自发行为，使用者应自行确认符合当地法律法规、运营商条款及相关平台协议。")
+                        Text("本软件按“现状”提供，开发者不提供任何明示或默示保证，也不对因使用本软件导致的设备异常、数据丢失、业务中断、账户风险或法律后果承担责任。请在理解相关风险后自行决定是否使用。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("运行日志") {
+                    Label("日志包含配对、回环连接和 AirLift 文件操作。", systemImage: "list.bullet.rectangle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    ShareLink(item: CarrierLockLog.shared.exportText()) {
+                        Label("导出日志", systemImage: "square.and.arrow.up")
+                    }
+                    Button("清空日志", role: .destructive) {
+                        CarrierLockLog.shared.clear()
+                    }
+                    .font(.footnote)
+                }
+            }
+            .navigationTitle("软件介绍")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.1"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "6"
+        return "版本 \(version) (\(build))"
+    }
+}
+
+#Preview {
+    CarrierLockAboutView()
+}
