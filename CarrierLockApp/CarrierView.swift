@@ -35,6 +35,7 @@ struct CarrierLockRootView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("CarrierLock")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if monitor.state == .listening || monitor.state == .starting {
