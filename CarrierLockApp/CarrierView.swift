@@ -25,7 +25,9 @@ struct CarrierLockRootView: View {
                         airliftSetupCard
                     }
 
-                    lockForm
+                    if !service.selectedIMSIs.isEmpty {
+                        lockForm
+                    }
                     lockButton
                     restoreButton
                     CarrierMonitorView()
@@ -173,41 +175,35 @@ struct CarrierLockRootView: View {
 
     private var lockForm: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !service.selectedIMSIs.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("已选 IMSI", systemImage: "checkmark.circle")
-                        .font(.headline)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("已选 IMSI", systemImage: "checkmark.circle")
+                    .font(.headline)
 
-                    ForEach(service.selectedIMSIs, id: \.self) { imsi in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(imsi)
-                                    .font(.callout.monospaced())
-                                Text(service.bundle(forIMSI: imsi))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button {
-                                editingIMSI = imsi
-                                showingBundlePicker = true
-                            } label: {
-                                Text("修改")
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .buttonStyle(.bordered)
+                ForEach(service.selectedIMSIs, id: \.self) { imsi in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(imsi)
+                                .font(.callout.monospaced())
+                            Text(service.bundle(forIMSI: imsi))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Button {
+                            editingIMSI = imsi
+                            showingBundlePicker = true
+                        } label: {
+                            Text("修改")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
                     }
-
-                    Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；无法识别或特殊场景可使用自定义 bundle 覆盖。")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
-            } else {
-                Label("暂无已选 IMSI，请先开始监听并开关飞行模式", systemImage: "clock")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
+
+            Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；无法识别或特殊场景可使用自定义 bundle 覆盖。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(16)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
@@ -302,7 +298,7 @@ struct CarrierLockRootView: View {
         switch service.mode {
         case .idle:
             service.selectedIMSIs.isEmpty
-                ? "尚未选择 IMSI。请先开始监听。"
+                ? "尚未选择 IMSI，请先开始监听并开关飞行模式。"
                 : "已选择 \(service.selectedIMSIs.count) 个 IMSI，确认后可锁定。"
         case .locking:
             "正在写入运营商配置链接。"
