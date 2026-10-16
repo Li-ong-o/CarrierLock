@@ -226,6 +226,7 @@ def get_live_device_info() -> dict | None:
                     'mcc': item.get('MCC', ''),
                     'mnc': item.get('MNC', ''),
                     'bundle_id': item.get('CFBundleIdentifier', ''),
+                    'bundle_version': item.get('CFBundleVersion', ''),
                 }
             elif slot == 'kTwo':
                 sim2 = {
@@ -234,6 +235,7 @@ def get_live_device_info() -> dict | None:
                     'mcc': item.get('MCC', ''),
                     'mnc': item.get('MNC', ''),
                     'bundle_id': item.get('CFBundleIdentifier', ''),
+                    'bundle_version': item.get('CFBundleVersion', ''),
                 }
 
         # Fallback for single SIM or direct keys

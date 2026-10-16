@@ -216,6 +216,20 @@ class CarrierLockGUI:
         )
         self.btn_lock.pack(fill="x", pady=(0, 6))
 
+        self.btn_verify = tk.Button(
+            card,
+            text="🔍 实时验证锁定生效状态",
+            font=("Segoe UI", 9, "bold"),
+            bg="#059669",
+            fg="#FFFFFF",
+            relief="flat",
+            padx=12,
+            pady=6,
+            state="disabled",
+            command=self.on_verify_clicked
+        )
+        self.btn_verify.pack(fill="x", pady=(0, 6))
+
         self.btn_restore = tk.Button(
             card,
             text="↩️ 恢复默认（清除锁定链接）",
@@ -292,6 +306,7 @@ class CarrierLockGUI:
         self.lbl_sim2_carrier.config(text="运营商匹配：--")
 
         self.btn_lock.config(state="disabled")
+        self.btn_verify.config(state="disabled")
         self.btn_export_pair.config(state="disabled")
         self.log("iPhone 已断开 USB 连接。等待连接数据线...")
 
@@ -305,6 +320,7 @@ class CarrierLockGUI:
             self.lbl_device_model.config(text="请在 iPhone 屏幕上解锁并点击【信任此电脑】")
             self.lbl_device_version.config(text="系统版本：--")
             self.btn_lock.config(state="disabled")
+            self.btn_verify.config(state="disabled")
             self.btn_export_pair.config(state="disabled")
             self.log(f"检测到设备 {udid}，但尚未完成信任配对。")
             return
@@ -319,20 +335,24 @@ class CarrierLockGUI:
         self.lbl_device_version.config(text=f"系统版本：iOS {ver} (Build {build})")
         self.lbl_device_udid.config(text=f"UDID: {udid}")
         self.btn_lock.config(state="normal")
+        self.btn_verify.config(state="normal")
         self.btn_export_pair.config(state="normal")
         self.log(f"成功连接设备：{name} (iOS {ver}, {prod})")
 
         # SIM 1 Live Detection
         sim1 = info.get("sim1", {})
         imsi1 = sim1.get("imsi", "")
+        cur_b1 = sim1.get("bundle_id", "")
+        cur_ver1 = sim1.get("bundle_version", "")
         if imsi1:
             guess1 = guess_bundle_for_imsi(imsi1)
             bname1 = guess1[0] if guess1 else "CBN_cn"
             friendly1 = guess1[1] if guess1 else "未知运营商"
             self.lbl_sim1_imsi.config(text=f"IMSI: {imsi1}")
-            self.lbl_sim1_carrier.config(text=f"运营商匹配：{friendly1} -> 推荐 {bname1}")
+            active_info = f" [当前生效: {cur_b1.replace('com.apple.', '')} {cur_ver1}]" if cur_b1 else ""
+            self.lbl_sim1_carrier.config(text=f"推荐: {bname1} ({friendly1}){active_info}")
             self.sim1_bundle_var.set(bname1)
-            self.log(f"卡槽 1 检测到 SIM：IMSI {imsi1} ({friendly1})")
+            self.log(f"卡槽 1 检测到 SIM：IMSI {imsi1} ({friendly1}) 当前生效: {cur_b1} {cur_ver1}")
         else:
             self.lbl_sim1_imsi.config(text="IMSI：未检测到或无法读取")
             self.lbl_sim1_carrier.config(text="运营商匹配：--")
@@ -340,14 +360,17 @@ class CarrierLockGUI:
         # SIM 2 Live Detection
         sim2 = info.get("sim2", {})
         imsi2 = sim2.get("imsi", "")
+        cur_b2 = sim2.get("bundle_id", "")
+        cur_ver2 = sim2.get("bundle_version", "")
         if imsi2:
             guess2 = guess_bundle_for_imsi(imsi2)
             bname2 = guess2[0] if guess2 else "Unicom_cn"
             friendly2 = guess2[1] if guess2 else "未知运营商"
             self.lbl_sim2_imsi.config(text=f"IMSI: {imsi2}")
-            self.lbl_sim2_carrier.config(text=f"运营商匹配：{friendly2} -> 推荐 {bname2}")
+            active_info = f" [当前生效: {cur_b2.replace('com.apple.', '')} {cur_ver2}]" if cur_b2 else ""
+            self.lbl_sim2_carrier.config(text=f"推荐: {bname2} ({friendly2}){active_info}")
             self.sim2_bundle_var.set(bname2)
-            self.log(f"卡槽 2 检测到 SIM：IMSI {imsi2} ({friendly2})")
+            self.log(f"卡槽 2 检测到 SIM：IMSI {imsi2} ({friendly2}) 当前生效: {cur_b2} {cur_ver2}")
         else:
             self.lbl_sim2_imsi.config(text="IMSI：未检测到或无法读取")
             self.lbl_sim2_carrier.config(text="运营商匹配：--")
@@ -448,6 +471,66 @@ class CarrierLockGUI:
         time.sleep(0.5)
         self.log("已成功清理 Overlay 中的锁定链接，恢复系统默认配置！✅")
         messagebox.showinfo("恢复完成", "已恢复系统默认运营商配置。\n请开关一次飞行模式使设置生效。")
+
+    def on_verify_clicked(self):
+        self.log("----------------------------------------")
+        self.log("正在通过 USB 实时验证当前基带运营商配置状态...")
+        info = get_live_device_info()
+        if not info or not info.get("connected") or not info.get("paired"):
+            messagebox.showwarning("提示", "未检测到已连接并信任的 iPhone，请先插好数据线并解锁手机！")
+            return
+
+        sim1 = info.get("sim1", {})
+        sim2 = info.get("sim2", {})
+
+        report_lines = []
+        all_passed = True
+
+        # Check SIM 1
+        if self.sim1_check_var.get():
+            target_b = self.sim1_bundle_var.get()
+            cur_b = sim1.get("bundle_id", "")
+            cur_ver = sim1.get("bundle_version", "")
+            imsi1 = sim1.get("imsi", "")
+
+            passed = (target_b.lower() in cur_b.lower()) if cur_b else False
+            if passed:
+                res = f"✅ 【卡槽 1】锁定已成功生效！\n   • 当前基带加载：{cur_b} ({cur_ver})\n   • 匹配目标：{target_b}\n   • 对应 IMSI：{imsi1}"
+            else:
+                all_passed = False
+                cur_display = f"{cur_b} ({cur_ver})" if cur_b else "未启用/未识别配置"
+                res = f"❌ 【卡槽 1】尚未命中目标配置！\n   • 当前基带加载：{cur_display}\n   • 期望目标：{target_b}\n   • 对应 IMSI：{imsi1}"
+            report_lines.append(res)
+            self.log(res.replace("\n", " "))
+
+        # Check SIM 2
+        if self.sim2_check_var.get():
+            target_b = self.sim2_bundle_var.get()
+            cur_b = sim2.get("bundle_id", "")
+            cur_ver = sim2.get("bundle_version", "")
+            imsi2 = sim2.get("imsi", "")
+
+            passed = (target_b.lower() in cur_b.lower()) if cur_b else False
+            if passed:
+                res = f"✅ 【卡槽 2】锁定已成功生效！\n   • 当前基带加载：{cur_b} ({cur_ver})\n   • 匹配目标：{target_b}\n   • 对应 IMSI：{imsi2}"
+            else:
+                all_passed = False
+                cur_display = f"{cur_b} ({cur_ver})" if cur_b else "未启用/未识别配置"
+                res = f"❌ 【卡槽 2】尚未命中目标配置！\n   • 当前基带加载：{cur_display}\n   • 期望目标：{target_b}\n   • 对应 IMSI：{imsi2}"
+            report_lines.append(res)
+            self.log(res.replace("\n", " "))
+
+        if not report_lines:
+            messagebox.showinfo("提示", "未勾选任何需要验证的卡槽！")
+            return
+
+        final_msg = "\n\n".join(report_lines)
+        if all_passed:
+            final_msg += "\n\n🎉 验证成功！所有选中的卡槽均已加载目标运营商配置！"
+            messagebox.showinfo("锁定验证通过", final_msg)
+        else:
+            final_msg += "\n\n💡 提示：如果刚刚在手机上执行了锁定，请在手机上下拉控制中心打开【飞行模式】等待 5 秒再关闭，待信号重载后再次点击此按钮验证。"
+            messagebox.showwarning("锁定尚未完全生效", final_msg)
 
 
 def main():
