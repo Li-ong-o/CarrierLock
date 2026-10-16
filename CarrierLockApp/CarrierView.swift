@@ -533,25 +533,39 @@ struct CarrierLockRootView: View {
 
             for imsi in service.selectedIMSIs {
                 let expected = service.bundle(forIMSI: imsi)
-                if expected == slot.activeBundle || (slot.plmn.count >= 5 && imsi.hasPrefix(slot.plmn)) {
+                if expected == slot.activeBundle || (!slot.plmn.isEmpty && slot.plmn.count >= 5 && imsi.hasPrefix(slot.plmn)) {
                     matchedExpected = true
                     expectedName = expected
                     break
                 }
             }
 
-            if matchedExpected || service.monitoredBundleNames.contains(activeBundle) {
-                lines.append("✅ 【\(slot.slotName)】\(slot.carrierName) (\(slot.plmn))\n   • 已挂载配置：\(activeBundle)\n   • 状态：锁定已生效！")
+            let syslogMatched = monitor.matchedBundles.contains(expectedName)
+
+            if matchedExpected || syslogMatched {
+                var detail = "✅ 【\(slot.slotName)】\(slot.carrierName)"
+                if !slot.plmn.isEmpty { detail += " (\(slot.plmn))" }
+                detail += "\n   • 当前挂载配置：\(activeBundle)"
+                if syslogMatched {
+                    detail += "\n   • 系统底层日志：已捕获 CommCenter 加载 \(expectedName)"
+                }
+                detail += "\n   • 状态：运营商配置锁定已生效！"
+                lines.append(detail)
             } else {
                 allPassed = false
-                lines.append("❌ 【\(slot.slotName)】\(slot.carrierName) (\(slot.plmn))\n   • 当前加载：\(activeBundle)\n   • 期望目标：\(expectedName)\n   • 状态：尚未命中目标配置")
+                var detail = "❌ 【\(slot.slotName)】\(slot.carrierName)"
+                if !slot.plmn.isEmpty { detail += " (\(slot.plmn))" }
+                detail += "\n   • 当前挂载：\(activeBundle)"
+                detail += "\n   • 期望目标：\(expectedName)"
+                detail += "\n   • 状态：尚未命中目标配置"
+                lines.append(detail)
             }
         }
 
         if allPassed {
-            lines.append("🎉 验证通过：活跃 SIM 卡已成功挂载目标运营商配置！")
+            lines.append("🎉 验证通过：手机当前卡槽已成功挂载目标运营商配置！")
         } else {
-            lines.append("💡 提示：如果刚刚执行了锁定，请下拉控制中心打开【飞行模式】等待 5 秒再关闭，待信号重载后再次点击验证。")
+            lines.append("💡 提示：如果刚刚执行了锁定，请下拉控制中心打开【飞行模式】等待 5 秒再关闭，待网络重载后再次点击此按钮验证。")
         }
 
         verificationReport = lines.joined(separator: "\n\n")
