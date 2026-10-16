@@ -124,48 +124,66 @@ struct CarrierMonitorView: View {
     }
 
     private var imsiCandidatesCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("从日志捕获的 IMSI", systemImage: "number.square")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            ForEach(Array(monitor.imsiCandidates).sorted(), id: \.self) { candidate in
-                Button {
-                    if service.selectedIMSIs.contains(candidate) {
-                        service.toggleDetectedIMSI(candidate)
-                    } else {
-                        service.selectDetectedIMSI(candidate)
+        let validCandidates = Array(monitor.imsiCandidates.filter { isLikelyRealIMSI($0) }).sorted()
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("从日志捕获的 IMSI", systemImage: "number.square")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !monitor.imsiCandidates.isEmpty {
+                    Button("清空") {
+                        monitor.clearCandidates()
                     }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(candidate)
-                                    .font(.callout.monospaced())
-                                if isLikelyRealIMSI(candidate) {
-                                    Text("疑似真实 IMSI")
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.teal.opacity(0.14), in: .capsule)
-                                        .foregroundStyle(.teal)
-                                }
-                            }
-                            Text(service.bundle(forIMSI: candidate))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if service.selectedIMSIs.contains(candidate) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.teal)
-                        }
-                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
             }
 
-            Text("点一下即可加入多 IMSI 锁定列表，并自动匹配 bundle。可以同时勾选真实 IMSI、卡贴上报 IMSI 和双卡 IMSI。仍建议优先核对真实 IMSI；误选明显错误的 IMSI 可能导致配置匹配异常。")
+            if validCandidates.isEmpty {
+                Text("暂未捕获到有效运营商 IMSI。请开关一次飞行模式重载信号。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                ForEach(validCandidates, id: \.self) { candidate in
+                    Button {
+                        if service.selectedIMSIs.contains(candidate) {
+                            service.toggleDetectedIMSI(candidate)
+                        } else {
+                            service.selectDetectedIMSI(candidate)
+                        }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(candidate)
+                                        .font(.callout.monospaced())
+                                    if isLikelyRealIMSI(candidate) {
+                                        Text("真实 IMSI")
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.teal.opacity(0.14), in: .capsule)
+                                            .foregroundStyle(.teal)
+                                    }
+                                }
+                                Text(service.bundle(forIMSI: candidate))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if service.selectedIMSIs.contains(candidate) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.teal)
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            Text("点一下即可加入多 IMSI 锁定列表，并自动匹配 bundle。系统已自动过滤底层时间戳等非运营商杂项。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

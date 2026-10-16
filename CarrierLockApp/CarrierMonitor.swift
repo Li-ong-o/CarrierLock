@@ -230,6 +230,19 @@ final class CarrierMonitor: ObservableObject {
         }
     }
 
+    nonisolated private static func isValidIMSICandidate(_ number: String) -> Bool {
+        // Exclude IMEI (starts with 35, 86, 01, etc.)
+        if number.hasPrefix("35") || number.hasPrefix("86") || number.hasPrefix("01") {
+            return false
+        }
+        // Must match a recognized ITU-T E.212 carrier PLMN (e.g. 460 for China, 310-316 for US, etc.)
+        guard let prefix = CarrierDetectionService.prefixCandidate(for: number),
+              CarrierDetectionService.bundle(for: prefix) != nil else {
+            return false
+        }
+        return true
+    }
+
     nonisolated private static func imsiMatches(in line: String) -> [String] {
         var matches: [String] = []
         var current = ""
@@ -238,14 +251,14 @@ final class CarrierMonitor: ObservableObject {
             if char.isNumber {
                 current.append(char)
             } else {
-                if current.count == 15, !current.hasPrefix("35"), !current.hasPrefix("86"), !current.hasPrefix("01") {
+                if current.count == 15, isValidIMSICandidate(current) {
                     matches.append(current)
                 }
                 current.removeAll(keepingCapacity: true)
             }
         }
 
-        if current.count == 15, !current.hasPrefix("35"), !current.hasPrefix("86"), !current.hasPrefix("01") {
+        if current.count == 15, isValidIMSICandidate(current) {
             matches.append(current)
         }
 

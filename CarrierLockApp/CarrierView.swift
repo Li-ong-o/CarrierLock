@@ -255,6 +255,16 @@ struct CarrierLockRootView: View {
                     Label("待锁定 IMSI 列表", systemImage: "simcard.2")
                         .font(.headline)
                     Spacer()
+                    if !service.selectedIMSIs.isEmpty {
+                        Button("清空") {
+                            for imsi in service.selectedIMSIs {
+                                service.toggleDetectedIMSI(imsi)
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .padding(.trailing, 4)
+                    }
                     Button {
                         manualIMSI = ""
                         showingManualIMSIInput = true

@@ -57,7 +57,13 @@ final class CarrierService: ObservableObject {
         }
         if let persistedIMSIs = UserDefaults.standard.stringArray(forKey: Self.selectedIMSIsKey),
            !persistedIMSIs.isEmpty {
-            detectedIMSIs = persistedIMSIs
+            // Clean up any historical junk numbers (keep only valid 15-digit real carrier IMSIs)
+            detectedIMSIs = persistedIMSIs.filter { imsi in
+                guard imsi.count == 15, imsi.allSatisfy(\.isNumber),
+                      !imsi.hasPrefix("35"), !imsi.hasPrefix("86"), !imsi.hasPrefix("01"),
+                      let prefix = CarrierDetectionService.prefixCandidate(for: imsi) else { return false }
+                return CarrierDetectionService.bundle(for: prefix) != nil
+            }
         }
 
         // Carrier detection is informational only. IMSI and bundle are
