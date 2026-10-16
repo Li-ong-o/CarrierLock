@@ -6,9 +6,26 @@ All notable changes to **CarrierLock** are documented in this file.
 
 ### Added
 
-- Multi-IMSI carrier overlay locking. One operation can write overlay links for
-  a real SIM IMSI, adapter-reported IMSIs, both dual-SIM lines, and additional
-  candidates.
+- Pre-write bundle validation: lock targets are checked against the
+  on-device `CarrierBundleList.allBundles` before writing, so a typo or a
+  stale bundle name can no longer create a dead symlink.
+
+### Fixed
+
+- Corrected the PLMN-to-bundle map: China Unicom is `Unicom_cn` (not
+  `China_Unicom`) and China Telecom is `ChinaTelecom_USIM_cn` (not
+  `CTC_china`) on modern iOS; added missing PLMNs 46010 (Unicom) and 46012
+  (Telecom). The guide doc table was updated to match.
+- The "Restore" action now explains the actual limitation (Airlift has no
+  delete primitive) and the real remediation paths, instead of pointing to a
+  `CarrierSIM` tool that is not shipped.
+- Removed the stale `scripts/test-tendies-import.py`, which referenced
+  wallpaper-injection helpers deleted from the app.
+
+### Changed
+
+- Renamed the leftover `TendiesEngine` to `AirliftEngine` (class, file, and
+  call sites); it only does pairing/VPN connectivity checks.
 
 ## [1.0.1] - 2026-10-15
 

@@ -93,10 +93,14 @@ final class CarrierService: ObservableObject {
     }
 
     func restore() async {
-        // Airlift FFI has no delete primitive in this build. Keep the failure
+        // Airlift FFI exposes write/read but no delete primitive, so the iOS
+        // app cannot remove an overlay link it wrote. Keep the failure
         // explicit so the user is not misled into thinking restore worked.
+        // Remediation paths: re-run lock with the correct bundle (the write
+        // overwrites the existing link), or wipe the overlay with an iOS
+        // update / full restore.
         mode = .failed(
-            String(localized: "Restore is not yet supported in the iOS app. Use CarrierSIM --restore from your Mac.")
+            String(localized: "Restore is not supported: the Airlift interface cannot delete overlay links. To fix a wrong lock, run lock again with the correct bundle (it overwrites the link). An iOS update or full restore clears the overlay.")
         )
     }
 
@@ -147,6 +151,15 @@ final class CarrierService: ObservableObject {
         }
         guard invalidBundles.isEmpty else {
             throw CarrierError.invalidBundle(invalidBundles.first ?? "(empty)")
+        }
+
+        // Guard against dead symlinks: the target must be a bundle Apple
+        // actually ships (see CarrierBundleList.allBundles). A link to a
+        // nonexistent bundle is silently ignored by CommCenter, which makes
+        // the lock look successful while doing nothing.
+        let unknownBundles = links.values.filter { !CarrierBundleCatalog.all.contains($0) }
+        guard unknownBundles.isEmpty else {
+            throw CarrierError.invalidBundle(unknownBundles.sorted().joined(separator: ", "))
         }
 
         busyMessage = String(localized: "Preparing carrier bundle link…")

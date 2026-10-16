@@ -272,7 +272,7 @@ struct CarrierLockAirliftSetupView: View {
         Task {
             defer { checking = false }
             do {
-                _ = try await TendiesEngine.shared.detectPosterBoardContainer(
+                _ = try await AirliftEngine.shared.detectPosterBoardContainer(
                     pairingPath: PairingController.pairingFilePath()
                 )
                 connected = true

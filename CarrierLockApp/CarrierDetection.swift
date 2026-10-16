@@ -42,7 +42,10 @@ struct CarrierDetection {
 
 enum CarrierDetectionService {
     /// Maps the SIM's reported PLMN (MCC+MNC) to the carrier-bundle folder
-    /// name Apple ships in /System/Library/Carrier Bundles/iPhone. Covers the
+    /// name Apple ships in /System/Library/Carrier Bundles/iPhone. Names are
+    /// verified against CarrierBundleList.allBundles (extracted from iOS):
+    /// Unicom is "Unicom_cn" (not "China_Unicom") and Telecom is
+    /// "ChinaTelecom_USIM_cn" (not "CTC_china") on modern iOS. Covers the
     /// carriers common on MEO/QPESIM setups; anything else falls back to
     /// manual entry.
     private static let bundleByPLMN: [String: String] = [
@@ -50,7 +53,9 @@ enum CarrierDetectionService {
         "46000": "CMCC_cn", "46002": "CMCC_cn", "46004": "CMCC_cn",
         "46007": "CMCC_cn", "46008": "CMCC_cn",
         "46001": "Unicom_cn", "46006": "Unicom_cn", "46009": "Unicom_cn",
-        "46003": "CTC_china", "46005": "CTC_china", "46011": "CTC_china",
+        "46010": "Unicom_cn",
+        "46003": "ChinaTelecom_USIM_cn", "46005": "ChinaTelecom_USIM_cn",
+        "46011": "ChinaTelecom_USIM_cn", "46012": "ChinaTelecom_USIM_cn",
         // 美国运营商（有锁机常见）
         "310410": "ATT_us", "311180": "ATT_us",
         "310260": "TMobile_us", "310240": "TMobile_us", "312530": "TMobile_us",

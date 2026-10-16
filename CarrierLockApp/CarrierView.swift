@@ -580,7 +580,7 @@ private struct CarrierStartupGateView: View {
             }
 
             do {
-                _ = try await TendiesEngine.shared.detectPosterBoardContainer(pairingPath: path)
+                _ = try await AirliftEngine.shared.detectPosterBoardContainer(pairingPath: path)
                 status = .ready
             } catch {
                 status = .setupRequired
