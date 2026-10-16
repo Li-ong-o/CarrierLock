@@ -476,7 +476,7 @@
 				<key>LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]</key>
 				<string>@executable_path/../Frameworks</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0.1</string>
+				<string>1.0.2</string>
 				<key>OTHER_LDFLAGS</key>
 				<array>
 					<string>$(inherited)</string>
@@ -577,7 +577,7 @@
 				<key>LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]</key>
 				<string>@executable_path/../Frameworks</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0.1</string>
+				<string>1.0.2</string>
 				<key>OTHER_LDFLAGS</key>
 				<array>
 					<string>$(inherited)</string>

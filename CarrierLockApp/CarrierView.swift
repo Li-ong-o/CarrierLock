@@ -9,6 +9,8 @@ struct CarrierLockRootView: View {
     @State private var editingIMSI: String?
     @State private var showingStartupGate = !PairingController.hasValidPairingFile()
     @State private var confirmingLock = false
+    @State private var showingManualIMSIInput = false
+    @State private var manualIMSI = ""
 
     var body: some View {
         NavigationStack {
@@ -25,9 +27,7 @@ struct CarrierLockRootView: View {
                         airliftSetupCard
                     }
 
-                    if !service.selectedIMSIs.isEmpty {
-                        lockForm
-                    }
+                    configurationCard
                     lockButton
                     restoreButton
                     CarrierMonitorView()
@@ -71,16 +71,32 @@ struct CarrierLockRootView: View {
             CarrierBundlePickerSheet(
                 bundleName: Binding(
                     get: {
-                        guard let imsi = editingIMSI else { return service.bundleName }
-                        return service.bundle(forIMSI: imsi)
+                        if let imsi = editingIMSI {
+                            return service.bundle(forIMSI: imsi)
+                        }
+                        return service.bundleName
                     },
                     set: { value in
-                        guard let imsi = editingIMSI else { return }
-                        service.customBundlesByIMSI[imsi] = value
+                        if let imsi = editingIMSI {
+                            service.customBundlesByIMSI[imsi] = value
+                        } else {
+                            service.selectBundle(value)
+                        }
                     }
                 )
             )
-                .presentationDetents([.large])
+            .presentationDetents([.large])
+        }
+        .alert("手动添加 IMSI", isPresented: $showingManualIMSIInput) {
+            TextField("输入 15 位 IMSI", text: $manualIMSI)
+                .keyboardType(.numberPad)
+            Button("添加") {
+                let trimmed = manualIMSI.trimmingCharacters(in: .whitespacesAndNewlines)
+                service.selectDetectedIMSI(trimmed)
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("请输入完整的 15 位数字 SIM 卡 IMSI（例如 46000XXXXXXXXXX）。如果已知本机 IMSI，可在此直接添加。")
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
             CarrierStartupGateView(onContinue: {
@@ -173,52 +189,147 @@ struct CarrierLockRootView: View {
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
     }
 
-    private var lockForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("已选 IMSI", systemImage: "checkmark.circle")
+    private var configurationCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // 默认目标运营商配置
+            VStack(alignment: .leading, spacing: 8) {
+                Label("目标运营商配置 (Carrier Bundle)", systemImage: "antenna.radiowaves.left.and.right")
                     .font(.headline)
 
-                ForEach(service.selectedIMSIs, id: \.self) { imsi in
+                Button {
+                    editingIMSI = nil
+                    showingBundlePicker = true
+                } label: {
                     HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(imsi)
-                                .font(.callout.monospaced())
-                            Text(service.bundle(forIMSI: imsi))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(service.bundleName)
+                                .font(.body.weight(.semibold).monospaced())
+                                .foregroundStyle(.primary)
+                            Text(bundleDisplayName(for: service.bundleName))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button {
-                            editingIMSI = imsi
-                            showingBundlePicker = true
-                        } label: {
-                            Text("修改")
-                                .font(.caption.weight(.semibold))
+                        Text("更换配置")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.tint)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            // 待锁定 IMSI 列表与手动添加
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("待锁定 IMSI 列表", systemImage: "simcard.2")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        manualIMSI = ""
+                        showingManualIMSIInput = true
+                    } label: {
+                        Label("手动添加", systemImage: "plus.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+
+                if service.selectedIMSIs.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("暂无选中的 IMSI")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("可在下方「自动获取 IMSI 并锁定」开始监听捕获，或点击右上角「手动添加」直接输入 15 位 IMSI。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.tertiarySystemFill).opacity(0.6), in: .rect(cornerRadius: 10))
+                } else {
+                    ForEach(service.selectedIMSIs, id: \.self) { imsi in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(imsi)
+                                    .font(.callout.monospaced())
+                                Text(service.bundle(forIMSI: imsi))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                editingIMSI = imsi
+                                showingBundlePicker = true
+                            } label: {
+                                Text("修改")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button(role: .destructive) {
+                                service.toggleDetectedIMSI(imsi)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(.red)
                         }
-                        .buttonStyle(.bordered)
+                        .padding(10)
+                        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
                     }
                 }
             }
 
-            Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；无法识别或特殊场景可使用自定义 bundle 覆盖。")
+            Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；支持单卡或双卡独立配置与锁定。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+    }
+
+    private func bundleDisplayName(for bundle: String) -> String {
+        switch bundle {
+        case "CMCC_cn": return "中国移动"
+        case "Unicom_cn": return "中国联通"
+        case "ChinaTelecom_USIM_cn": return "中国电信"
+        case "CBN_cn": return "中国广电"
+        case "ATT_US", "ATT_NR_US": return "AT&T (美国)"
+        case "TMobile_US": return "T-Mobile (美国)"
+        case "Verizon_LTE_US": return "Verizon (美国)"
+        case "Vodafone_uk": return "Vodafone (英国)"
+        case "Vodafone_de": return "Vodafone (德国)"
+        default: return "自定义/系统配置"
+        }
     }
 
     private var lockButton: some View {
-        Button {
-            confirmingLock = true
-        } label: {
-            Label("锁定运营商配置", systemImage: "lock.fill")
-                .frame(maxWidth: .infinity)
+        VStack(spacing: 8) {
+            Button {
+                confirmingLock = true
+            } label: {
+                Label("锁定运营商配置", systemImage: "lock.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(service.selectedIMSIs.isEmpty || isBusy)
+
+            if service.selectedIMSIs.isEmpty {
+                Text("请先添加或选择至少一个 IMSI")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled(isBusy)
     }
     private var restoreButton: some View {
         Button(role: .destructive) {
