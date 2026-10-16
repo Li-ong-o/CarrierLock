@@ -5,3 +5,4 @@ tmp/
 # Xcode user-local state
 *.xcuserstate
 xcuserdata/
+*.ipa
