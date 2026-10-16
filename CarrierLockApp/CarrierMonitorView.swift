@@ -229,14 +229,12 @@ struct CarrierMonitorView: View {
 
     private var monitorDescription: String {
         switch monitor.state {
-        case .idle:
-            "尚未开始监听。"
+        case .stopped:
+            "尚未开始监听或监听已停止。"
         case .starting:
             "正在连接设备 syslog…"
         case .listening:
             "正在监听。现在请到卡贴程序里刷新 SIM 卡信号。"
-        case .stopped:
-            "监听已停止。可重新开始监听。"
         case .failed(let message):
             message
         }

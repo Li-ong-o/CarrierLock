@@ -284,60 +284,60 @@ final class PairingController: ObservableObject {
 
     // MARK: Bonjour advertising
 
-    private func startAdvertising(port: Int32) {
+    fileprivate func startAdvertising(serviceID: String, port: Int32, txt: [String: Data]) {
         stopAdvertising()
-        let svc = NetService(
-            domain: "local.",
+        let service = NetService(
+            domain: "",
             type: "_remotepairing-pairable-host._tcp.",
-            name: hostName,
+            name: serviceID,
             port: port
         )
-        svc.includesPeerToPeer = true
-        var txt: [String: Data] = [:]
-        txt["name"] = hostName.data(using: .utf8)
-        txt["model"] = hostModel.data(using: .utf8)
-        txt["altIRK"] = Self.storedAltIRK.data(using: .utf8) ?? Data()
-        svc.setTXTRecord(NetService.data(fromTXTRecord: txt))
-        svc.publish()
-        netService = svc
+        service.setTXTRecord(NetService.data(fromTXTRecord: txt))
+        service.publish()
+        netService = service
+        pairingStatus = "Advertising — open Settings › Privacy & Security › Developer Mode"
+    }
+
+    fileprivate func presentPin(_ pin: String) {
+        pairingPIN = pin
+        pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with CarrierLock"
     }
 
     private func stopAdvertising() {
         netService?.stop()
         netService = nil
     }
-
-    fileprivate func onHostReady(port: Int32) {
-        startAdvertising(port: port)
-        pairingStatus = "Host ready on port \(port), advertising…"
-    }
-
-    fileprivate func onPinPrompt(_ pin: String) {
-        pairingPIN = pin
-        pairingStatus = "PIN prompt active"
-    }
 }
 
 // MARK: - C Callbacks
 
-private func cStr(_ p: UnsafePointer<CChar>?) -> String {
-    guard let p = p else { return "" }
-    return String(cString: p)
+private func cStr(_ ptr: UnsafeMutablePointer<CChar>?) -> String {
+    guard let ptr = ptr else { return "" }
+    return String(cString: ptr)
 }
 
-private let pairReadyCallback: @convention(c) (Int32, UnsafeMutableRawPointer?) -> Void = { port, ctx in
-    guard let ctx = ctx else { return }
+private let pairReadyCallback: ALPairReadyCb = { ctx, serviceID, port, keys, vals, count in
+    guard let ctx = ctx, let serviceID = serviceID else { return }
     let controller = Unmanaged<PairingController>.fromOpaque(ctx).takeUnretainedValue()
+    let id = String(cString: serviceID)
+
+    var txt: [String: Data] = [:]
+    if let keys = keys, let vals = vals {
+        for i in 0..<Int(count) {
+            guard let k = keys[i], let v = vals[i] else { continue }
+            txt[String(cString: k)] = Data(String(cString: v).utf8)
+        }
+    }
     DispatchQueue.main.async {
-        controller.onHostReady(port: port)
+        controller.startAdvertising(serviceID: id, port: Int32(port), txt: txt)
     }
 }
 
-private let pairPinCallback: @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void = { pinC, ctx in
-    guard let ctx = ctx else { return }
-    let pin = cStr(pinC)
+private let pairPinCallback: ALPairPinCb = { pin, ctx in
+    guard let ctx = ctx, let pin = pin else { return }
     let controller = Unmanaged<PairingController>.fromOpaque(ctx).takeUnretainedValue()
+    let pinString = String(cString: pin)
     DispatchQueue.main.async {
-        controller.onPinPrompt(pin)
+        controller.presentPin(pinString)
     }
 }
