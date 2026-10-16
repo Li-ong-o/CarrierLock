@@ -22,8 +22,8 @@ except Exception:
 from usbmux import UsbmuxClient, find_paired_udids, get_pairing_record, get_live_device_info
 from carrier_catalog import guess_bundle_for_imsi, POPULAR_BUNDLES
 
-APP_TITLE = "CarrierLock - 运营商配置锁定工具 (Windows版 v1.0.3)"
-VERSION = "1.0.3"
+APP_TITLE = "CarrierLock - 运营商配置锁定工具 (Windows版 v1.0.4)"
+VERSION = "1.0.4"
 
 class CarrierLockGUI:
     def __init__(self, root: tk.Tk):
