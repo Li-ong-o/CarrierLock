@@ -137,4 +137,42 @@ enum CarrierDetectionService {
             }
         }
     }
+
+    static func queryActiveSIMSlots() -> [ActiveSIMSlot] {
+        let info = CTTelephonyNetworkInfo()
+        var list: [ActiveSIMSlot] = []
+        if let providers = info.serviceSubscriberCellularProviders {
+            let sortedKeys = providers.keys.sorted()
+            for (index, key) in sortedKeys.enumerated() {
+                if let carrier = providers[key] {
+                    var det = CarrierDetection()
+                    applyCarrier(carrier, to: &det)
+                    let cName = carrier.carrierName ?? "未知运营商"
+                    let mcc = det.mcc ?? ""
+                    let mnc = det.mnc ?? ""
+                    let plmn = (mcc.isEmpty || mnc.isEmpty) ? "" : (mcc + mnc)
+                    list.append(ActiveSIMSlot(
+                        slotIndex: index + 1,
+                        carrierName: cName,
+                        mcc: mcc,
+                        mnc: mnc,
+                        plmn: plmn,
+                        activeBundle: det.bundleName
+                    ))
+                }
+            }
+        }
+        return list
+    }
 }
+
+struct ActiveSIMSlot: Identifiable, Sendable {
+    let id = UUID()
+    let slotIndex: Int
+    let carrierName: String
+    let mcc: String
+    let mnc: String
+    let plmn: String
+    let activeBundle: String?
+}
+

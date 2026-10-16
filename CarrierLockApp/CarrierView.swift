@@ -12,6 +12,8 @@ struct CarrierLockRootView: View {
     @State private var showingManualIMSIInput = false
     @State private var manualIMSI = ""
     @State private var showingIMEIWarning = false
+    @State private var showingVerificationAlert = false
+    @State private var verificationReport = ""
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,7 @@ struct CarrierLockRootView: View {
 
                     configurationCard
                     lockButton
+                    verifyButton
                     restoreButton
                     CarrierMonitorView()
                     details
@@ -113,6 +116,11 @@ struct CarrierLockRootView: View {
             }
         } message: {
             Text("您输入的号码以 35/86 开头，这是 iPhone 的硬件串号 (IMEI) 而非 SIM 卡的 IMSI。国内 SIM 卡的 IMSI 必定以 460 开头（可在电脑爱思助手【查看设备详情】中复制 InternationalMobileSubscriberIdentity）。锁定 IMEI 无法生效。")
+        }
+        .alert("锁定生效验证", isPresented: $showingVerificationAlert) {
+            Button("知道了") {}
+        } message: {
+            Text(verificationReport)
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
             CarrierStartupGateView(onContinue: {
@@ -347,6 +355,20 @@ struct CarrierLockRootView: View {
             }
         }
     }
+
+    private var verifyButton: some View {
+        Button {
+            runActiveVerification()
+        } label: {
+            Label("验证锁定生效状态", systemImage: "checkmark.seal.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.green)
+        .controlSize(.large)
+        .disabled(isBusy)
+    }
+
     private var restoreButton: some View {
         Button(role: .destructive) {
             Task { await service.restore() }
@@ -491,6 +513,49 @@ struct CarrierLockRootView: View {
         } else {
             service.selectDetectedIMSI(trimmed)
         }
+    }
+
+    private func runActiveVerification() {
+        let slots = CarrierDetectionService.queryActiveSIMSlots()
+        if slots.isEmpty {
+            verificationReport = "未检测到活跃的 SIM 卡，请确保已插入物理 SIM 卡或启用了 eSIM。"
+            showingVerificationAlert = true
+            return
+        }
+
+        var lines: [String] = []
+        var allPassed = true
+
+        for slot in slots {
+            let activeBundle = slot.activeBundle ?? "未知配置"
+            var matchedExpected = false
+            var expectedName = service.bundleName
+
+            for imsi in service.selectedIMSIs {
+                let expected = service.bundle(forIMSI: imsi)
+                if expected == slot.activeBundle || (slot.plmn.count >= 5 && imsi.hasPrefix(slot.plmn)) {
+                    matchedExpected = true
+                    expectedName = expected
+                    break
+                }
+            }
+
+            if matchedExpected || service.monitoredBundleNames.contains(activeBundle) {
+                lines.append("✅ 【\(slot.slotName)】\(slot.carrierName) (\(slot.plmn))\n   • 已挂载配置：\(activeBundle)\n   • 状态：锁定已生效！")
+            } else {
+                allPassed = false
+                lines.append("❌ 【\(slot.slotName)】\(slot.carrierName) (\(slot.plmn))\n   • 当前加载：\(activeBundle)\n   • 期望目标：\(expectedName)\n   • 状态：尚未命中目标配置")
+            }
+        }
+
+        if allPassed {
+            lines.append("🎉 验证通过：活跃 SIM 卡已成功挂载目标运营商配置！")
+        } else {
+            lines.append("💡 提示：如果刚刚执行了锁定，请下拉控制中心打开【飞行模式】等待 5 秒再关闭，待信号重载后再次点击验证。")
+        }
+
+        verificationReport = lines.joined(separator: "\n\n")
+        showingVerificationAlert = true
     }
 }
 
