@@ -19,7 +19,7 @@ try:
 except Exception:
     pass
 
-from usbmux import UsbmuxClient, find_paired_udids, get_pairing_record
+from usbmux import UsbmuxClient, find_paired_udids, get_pairing_record, get_live_device_info
 from carrier_catalog import guess_bundle_for_imsi, POPULAR_BUNDLES
 
 APP_TITLE = "CarrierLock - 运营商配置锁定工具 (Windows版 v1.0.3)"
@@ -122,7 +122,7 @@ class CarrierLockGUI:
         card = tk.LabelFrame(parent, text=" 📲 已连接 iPhone 设备信息 ", font=self.font_heading, bg="#FFFFFF", fg="#1E3A8A", padx=12, pady=10)
         card.pack(fill="x", pady=(0, 10))
 
-        self.lbl_device_name = tk.Label(card, text="设备状态：正在检测 USB 连接...", font=self.font_heading, bg="#FFFFFF", fg="#2563EB")
+        self.lbl_device_name = tk.Label(card, text="设备状态：未检测到 USB 连接的 iPhone", font=self.font_heading, bg="#FFFFFF", fg="#DC2626")
         self.lbl_device_name.pack(anchor="w", pady=(0, 4))
 
         self.lbl_device_model = tk.Label(card, text="设备型号：--", font=self.font_body, bg="#FFFFFF", fg="#4B5563")
@@ -140,7 +140,7 @@ class CarrierLockGUI:
         self.btn_refresh = tk.Button(btn_box, text="🔄 刷新连接", font=self.font_body, command=self.on_refresh_device, bg="#E5E7EB", relief="groove")
         self.btn_refresh.pack(side="left", padx=(0, 6))
 
-        self.btn_export_pair = tk.Button(btn_box, text="💾 导出配对文件 (.plist)", font=self.font_body, command=self.on_export_pairing, bg="#E5E7EB", relief="groove")
+        self.btn_export_pair = tk.Button(btn_box, text="💾 导出配对文件 (.plist)", font=self.font_body, command=self.on_export_pairing, bg="#E5E7EB", relief="groove", state="disabled")
         self.btn_export_pair.pack(side="left")
 
     def build_sim_cards(self, parent):
@@ -155,10 +155,10 @@ class CarrierLockGUI:
         self.chk_sim1 = tk.Checkbutton(sim1_box, text="锁定此卡运营商配置", variable=self.sim1_check_var, font=self.font_body, bg="#F9FAFB")
         self.chk_sim1.pack(anchor="w")
 
-        self.lbl_sim1_imsi = tk.Label(sim1_box, text="IMSI：未检测到", font=self.font_mono, bg="#F9FAFB", fg="#111827")
+        self.lbl_sim1_imsi = tk.Label(sim1_box, text="IMSI：未连接", font=self.font_mono, bg="#F9FAFB", fg="#6B7280")
         self.lbl_sim1_imsi.pack(anchor="w")
 
-        self.lbl_sim1_carrier = tk.Label(sim1_box, text="运营商匹配：待识别", font=self.font_body, bg="#F9FAFB", fg="#059669")
+        self.lbl_sim1_carrier = tk.Label(sim1_box, text="运营商匹配：待连接", font=self.font_body, bg="#F9FAFB", fg="#6B7280")
         self.lbl_sim1_carrier.pack(anchor="w")
 
         sim1_bundle_box = tk.Frame(sim1_box, bg="#F9FAFB")
@@ -176,10 +176,10 @@ class CarrierLockGUI:
         self.chk_sim2 = tk.Checkbutton(sim2_box, text="锁定此卡运营商配置", variable=self.sim2_check_var, font=self.font_body, bg="#F9FAFB")
         self.chk_sim2.pack(anchor="w")
 
-        self.lbl_sim2_imsi = tk.Label(sim2_box, text="IMSI：未检测到", font=self.font_mono, bg="#F9FAFB", fg="#111827")
+        self.lbl_sim2_imsi = tk.Label(sim2_box, text="IMSI：未连接", font=self.font_mono, bg="#F9FAFB", fg="#6B7280")
         self.lbl_sim2_imsi.pack(anchor="w")
 
-        self.lbl_sim2_carrier = tk.Label(sim2_box, text="运营商匹配：待识别", font=self.font_body, bg="#F9FAFB", fg="#059669")
+        self.lbl_sim2_carrier = tk.Label(sim2_box, text="运营商匹配：待连接", font=self.font_body, bg="#F9FAFB", fg="#6B7280")
         self.lbl_sim2_carrier.pack(anchor="w")
 
         sim2_bundle_box = tk.Frame(sim2_box, bg="#F9FAFB")
@@ -211,6 +211,7 @@ class CarrierLockGUI:
             relief="flat",
             padx=12,
             pady=8,
+            state="disabled",
             command=self.on_lock_clicked
         )
         self.btn_lock.pack(fill="x", pady=(0, 6))
@@ -266,42 +267,90 @@ class CarrierLockGUI:
         t.start()
 
     def poll_device(self):
-        paired = find_paired_udids()
-        if not paired:
-            self.root.after(0, self.update_device_ui_disconnected)
+        info = get_live_device_info()
+        if not info or not info.get("connected"):
+            if self.current_udid is not None:
+                self.current_udid = None
+                self.root.after(0, self.update_device_ui_disconnected)
             return
 
-        udid = paired[0]
-        rec = get_pairing_record(udid)
+        udid = info.get("udid")
         if udid != self.current_udid:
             self.current_udid = udid
-            self.root.after(0, lambda: self.update_device_ui_connected(udid, rec))
+            self.root.after(0, lambda: self.update_device_ui_connected(info))
 
     def update_device_ui_disconnected(self):
-        self.lbl_device_name.config(text="设备状态：未检测到已连接的 iPhone", fg="#DC2626")
-        self.lbl_device_model.config(text="请使用 USB 数据线将 iPhone 连接至电脑，并解锁手机点击【信任】")
+        self.lbl_device_name.config(text="设备状态：未检测到 USB 连接的 iPhone", fg="#DC2626")
+        self.lbl_device_model.config(text="设备型号：--")
+        self.lbl_device_version.config(text="系统版本：--")
+        self.lbl_device_udid.config(text="UDID 标识：--")
 
-    def update_device_ui_connected(self, udid: str, rec: dict | None):
-        self.lbl_device_name.config(text=f"设备状态：已连接 iPhone (已配对)", fg="#16A34A")
+        self.lbl_sim1_imsi.config(text="IMSI：未连接")
+        self.lbl_sim1_carrier.config(text="运营商匹配：--")
+
+        self.lbl_sim2_imsi.config(text="IMSI：未连接")
+        self.lbl_sim2_carrier.config(text="运营商匹配：--")
+
+        self.btn_lock.config(state="disabled")
+        self.btn_export_pair.config(state="disabled")
+        self.log("iPhone 已断开 USB 连接。等待连接数据线...")
+
+    def update_device_ui_connected(self, info: dict):
+        udid = info.get("udid", "")
+        paired = info.get("paired", False)
+
+        if not paired:
+            self.lbl_device_name.config(text="设备状态：已连接但未配对 (请在手机上点击【信任】)", fg="#EAB308")
+            self.lbl_device_udid.config(text=f"UDID: {udid}")
+            self.lbl_device_model.config(text="请在 iPhone 屏幕上解锁并点击【信任此电脑】")
+            self.lbl_device_version.config(text="系统版本：--")
+            self.btn_lock.config(state="disabled")
+            self.btn_export_pair.config(state="disabled")
+            self.log(f"检测到设备 {udid}，但尚未完成信任配对。")
+            return
+
+        name = info.get("device_name", "iPhone")
+        prod = info.get("product_type", "iPhone")
+        ver = info.get("product_version", "")
+        build = info.get("build_version", "")
+
+        self.lbl_device_name.config(text=f"设备状态：已连接 {name} (已配对)", fg="#16A34A")
+        self.lbl_device_model.config(text=f"设备型号：{prod}")
+        self.lbl_device_version.config(text=f"系统版本：iOS {ver} (Build {build})")
         self.lbl_device_udid.config(text=f"UDID: {udid}")
-        self.log(f"检测到配对设备: {udid}")
+        self.btn_lock.config(state="normal")
+        self.btn_export_pair.config(state="normal")
+        self.log(f"成功连接设备：{name} (iOS {ver}, {prod})")
 
-        # If we have previous real IMSIs for this user from earlier test, autofill
-        if udid.startswith("00008150"):
-            self.lbl_device_model.config(text="设备型号：iPhone 17 Pro (iPhone18,1) • LL/A 美版")
-            self.lbl_device_version.config(text="系统版本：iOS 27.0.1 (Build 24A446)")
+        # SIM 1 Live Detection
+        sim1 = info.get("sim1", {})
+        imsi1 = sim1.get("imsi", "")
+        if imsi1:
+            guess1 = guess_bundle_for_imsi(imsi1)
+            bname1 = guess1[0] if guess1 else "CBN_cn"
+            friendly1 = guess1[1] if guess1 else "未知运营商"
+            self.lbl_sim1_imsi.config(text=f"IMSI: {imsi1}")
+            self.lbl_sim1_carrier.config(text=f"运营商匹配：{friendly1} -> 推荐 {bname1}")
+            self.sim1_bundle_var.set(bname1)
+            self.log(f"卡槽 1 检测到 SIM：IMSI {imsi1} ({friendly1})")
+        else:
+            self.lbl_sim1_imsi.config(text="IMSI：未检测到或无法读取")
+            self.lbl_sim1_carrier.config(text="运营商匹配：--")
 
-            # SIM 1 (广电)
-            self.lbl_sim1_imsi.config(text="IMSI: 460151112036985 (中国广电)")
-            self.lbl_sim1_carrier.config(text="运营商匹配：已识别为 中国广电 5G -> 推荐 CBN_cn")
-            self.sim1_bundle_var.set("CBN_cn")
-
-            # SIM 2 (联通)
-            self.lbl_sim2_imsi.config(text="IMSI: 460098475019127 (中国联通)")
-            self.lbl_sim2_carrier.config(text="运营商匹配：已识别为 中国联通 5G -> 推荐 Unicom_cn")
-            self.sim2_bundle_var.set("Unicom_cn")
-
-            self.log("已自动填入本机卡槽1 (广电 46015...) 和卡槽2 (联通 46009...) 真实 IMSI。")
+        # SIM 2 Live Detection
+        sim2 = info.get("sim2", {})
+        imsi2 = sim2.get("imsi", "")
+        if imsi2:
+            guess2 = guess_bundle_for_imsi(imsi2)
+            bname2 = guess2[0] if guess2 else "Unicom_cn"
+            friendly2 = guess2[1] if guess2 else "未知运营商"
+            self.lbl_sim2_imsi.config(text=f"IMSI: {imsi2}")
+            self.lbl_sim2_carrier.config(text=f"运营商匹配：{friendly2} -> 推荐 {bname2}")
+            self.sim2_bundle_var.set(bname2)
+            self.log(f"卡槽 2 检测到 SIM：IMSI {imsi2} ({friendly2})")
+        else:
+            self.lbl_sim2_imsi.config(text="IMSI：未检测到或无法读取")
+            self.lbl_sim2_carrier.config(text="运营商匹配：--")
 
     def apply_manual_imsi(self, slot: int):
         val = self.entry_manual_imsi.get().strip()

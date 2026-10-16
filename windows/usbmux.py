@@ -114,3 +114,163 @@ class UsbmuxClient:
         s = self.sock
         self.sock = None
         return s
+
+def get_live_device_info() -> dict | None:
+    """
+    Connects to live USB iPhone via usbmuxd and queries real-time hardware,
+    device, and dual-SIM CarrierBundleInfoArray info over SSL lockdown.
+    Returns None if no device is physically attached via USB.
+    """
+    client = UsbmuxClient()
+    try:
+        devices = client.list_devices()
+    except Exception:
+        return None
+
+    if not devices:
+        return None
+
+    dev = devices[0]
+    udid = dev.get("SerialNumber")
+    device_id = dev.get("DeviceID")
+    if not udid or not device_id:
+        return None
+
+    rec = get_pairing_record(udid)
+    if not rec:
+        return {
+            "connected": True,
+            "paired": False,
+            "udid": udid,
+            "device_name": "未配对设备（请在手机上点击信任此电脑）",
+            "sim1": {},
+            "sim2": {}
+        }
+
+    s = None
+    ssl_s = None
+    try:
+        s = client.connect_device_port(device_id, LOCKDOWN_PORT)
+
+        def send_recv(sock, req):
+            payload = plistlib.dumps(req)
+            sock.sendall(struct.pack('>I', len(payload)) + payload)
+            hdr = sock.recv(4)
+            if len(hdr) < 4:
+                return None
+            resp_len = struct.unpack('>I', hdr)[0]
+            data = b''
+            while len(data) < resp_len:
+                chunk = sock.recv(min(4096, resp_len - len(data)))
+                if not chunk:
+                    break
+                data += chunk
+            return plistlib.loads(data)
+
+        # Start Lockdown Session
+        resp = send_recv(s, {
+            'Request': 'StartSession',
+            'HostID': rec['HostID'],
+            'SystemBUID': rec.get('SystemBUID', '')
+        })
+
+        if not resp or not resp.get('EnableSessionSSL'):
+            return {
+                "connected": True,
+                "paired": False,
+                "udid": udid,
+                "device_name": "需要解锁并信任此电脑",
+                "sim1": {},
+                "sim2": {}
+            }
+
+        # Wrap SSL
+        import tempfile
+        with tempfile.NamedTemporaryFile('wb', delete=False) as cert_f, tempfile.NamedTemporaryFile('wb', delete=False) as key_f:
+            cert_f.write(rec['HostCertificate'])
+            key_f.write(rec['HostPrivateKey'])
+            cert_path = cert_f.name
+            key_path = key_f.name
+
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            ssl_s = ctx.wrap_socket(s)
+        finally:
+            try:
+                os.unlink(cert_path)
+                os.unlink(key_path)
+            except Exception:
+                pass
+
+        # Query all live root properties
+        root_val = send_recv(ssl_s, {'Request': 'GetValue'}).get('Value', {})
+
+        device_name = root_val.get('DeviceName', 'iPhone')
+        product_type = root_val.get('ProductType', 'iPhone')
+        product_version = root_val.get('ProductVersion', '')
+        build_version = root_val.get('BuildVersion', '')
+
+        carrier_arr = root_val.get('CarrierBundleInfoArray', [])
+        sim1 = {}
+        sim2 = {}
+
+        for item in carrier_arr:
+            slot = item.get('Slot', '')
+            if slot == 'kOne':
+                sim1 = {
+                    'imsi': item.get('InternationalMobileSubscriberIdentity', ''),
+                    'iccid': item.get('IntegratedCircuitCardIdentity', ''),
+                    'mcc': item.get('MCC', ''),
+                    'mnc': item.get('MNC', ''),
+                    'bundle_id': item.get('CFBundleIdentifier', ''),
+                }
+            elif slot == 'kTwo':
+                sim2 = {
+                    'imsi': item.get('InternationalMobileSubscriberIdentity', ''),
+                    'iccid': item.get('IntegratedCircuitCardIdentity', ''),
+                    'mcc': item.get('MCC', ''),
+                    'mnc': item.get('MNC', ''),
+                    'bundle_id': item.get('CFBundleIdentifier', ''),
+                }
+
+        # Fallback for single SIM or direct keys
+        if not sim1.get('imsi') and root_val.get('InternationalMobileSubscriberIdentity'):
+            sim1['imsi'] = root_val.get('InternationalMobileSubscriberIdentity')
+        if not sim2.get('imsi') and root_val.get('InternationalMobileSubscriberIdentity2'):
+            sim2['imsi'] = root_val.get('InternationalMobileSubscriberIdentity2')
+
+        return {
+            "connected": True,
+            "paired": True,
+            "udid": udid,
+            "device_name": device_name,
+            "product_type": product_type,
+            "product_version": product_version,
+            "build_version": build_version,
+            "sim1": sim1,
+            "sim2": sim2
+        }
+    except Exception as e:
+        return {
+            "connected": True,
+            "paired": True,
+            "udid": udid,
+            "error": str(e),
+            "sim1": {},
+            "sim2": {}
+        }
+    finally:
+        if ssl_s:
+            try:
+                ssl_s.close()
+            except Exception:
+                pass
+        elif s:
+            try:
+                s.close()
+            except Exception:
+                pass
+
