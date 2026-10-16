@@ -174,5 +174,9 @@ struct ActiveSIMSlot: Identifiable, Sendable {
     let mnc: String
     let plmn: String
     let activeBundle: String?
+
+    var slotName: String {
+        "卡槽 \(slotIndex)"
+    }
 }
 
