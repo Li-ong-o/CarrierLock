@@ -448,29 +448,28 @@ class CarrierLockGUI:
             return
 
         self.log("----------------------------------------")
-        self.log(f"开始执行 Carrier Bundle 锁定任务（目标数量: {len(targets)}）...")
-
-        def run_task():
-            for imsi, bundle in targets:
-                self.log(f"正在配置映射: {imsi} -> /System/Library/Carrier Bundles/iPhone/{bundle}.bundle")
-                time.sleep(0.6)
-            self.log("运营商配置链接写入完成！✅")
-            self.log("提示：请在 iPhone 下拉控制中心打开【飞行模式】等待 5 秒再关闭，即可生效。")
-            self.root.after(0, lambda: messagebox.showinfo(
-                "锁定成功",
-                "运营商配置锁定已完成！\n\n请在 iPhone 下拉控制中心打开【飞行模式】等待 5 秒后再关闭，即可完成网络重载与配置生效。"
-            ))
-
-        t = threading.Thread(target=run_task, daemon=True)
-        t.start()
+        msg = (
+            "【iOS 运营商锁定说明】\n\n"
+            "iOS 运营商配置锁定底层依赖 AirTraffic 沙盒漏洞（写入 /var/mobile/Library/Carrier Bundles/iPhone/）。\n"
+            "该漏洞引擎目前内置于手机端 CarrierLock App 中。\n\n"
+            "操作指引：\n"
+            "1. 点击本程序下方的【导出当前配对文件 (.plist)】，将配对文件传至手机。\n"
+            "2. 在手机端打开 CarrierLock App 导入该配对文件，并点击【一键锁定配置】。\n"
+            "3. 手机端锁定并开关飞行模式后，即可随时在此电脑端点击【实时验证】检测基带加载状态！"
+        )
+        self.log("提示：请导出配对文件至手机端 CarrierLock App 执行实际锁定写入。")
+        messagebox.showinfo("写入锁定指引", msg)
 
     def on_restore_clicked(self):
-        if not messagebox.askyesno("确认恢复", "是否清除此前锁定的运营商配置链接并恢复默认？"):
-            return
-        self.log("正在执行配置恢复...")
-        time.sleep(0.5)
-        self.log("已成功清理 Overlay 中的锁定链接，恢复系统默认配置！✅")
-        messagebox.showinfo("恢复完成", "已恢复系统默认运营商配置。\n请开关一次飞行模式使设置生效。")
+        msg = (
+            "【恢复默认运营商配置说明】\n\n"
+            "由于 iOS 系统沙盒漏洞接口限制，Airlift 引擎不支持物理删除文件（无法直接 rm 软链接）。\n\n"
+            "如需恢复原卡官方默认配置，有两种可靠方法：\n"
+            "• 方法 1（覆盖恢复）：在手机端 CarrierLock 中，将目标运营商选为您 SIM 卡的原生配置（如广电卡选回 CBN_cn，移动卡选回 CMCC_cn）再次点击锁定，即可覆盖写回默认配置。\n"
+            "• 方法 2（彻底清理）：在手机上【还原网络设置】或重启/升级 iOS 系统，系统会自动清空 Carrier Bundles Overlay 临时链接。"
+        )
+        self.log("提示：查看恢复默认配置指引。")
+        messagebox.showinfo("恢复默认说明", msg)
 
     def on_verify_clicked(self):
         self.log("----------------------------------------")
@@ -493,13 +492,38 @@ class CarrierLockGUI:
             cur_ver = sim1.get("bundle_version", "")
             imsi1 = sim1.get("imsi", "")
 
-            passed = (target_b.lower() in cur_b.lower()) if cur_b else False
-            if passed:
-                res = f"✅ 【卡槽 1】锁定已成功生效！\n   • 当前基带加载：{cur_b} ({cur_ver})\n   • 匹配目标：{target_b}\n   • 对应 IMSI：{imsi1}"
+            guess = guess_bundle_for_imsi(imsi1)
+            default_b = guess[0] if guess else ""
+            default_friendly = guess[1] if guess else "未知运营商"
+
+            if not cur_b:
+                res = f"⚠️ 【卡槽 1】未能读取到基带当前配置（SIM 卡可能未就绪或未插卡）"
+                all_passed = False
+            elif target_b.lower() == default_b.lower():
+                res = (
+                    f"ℹ️ 【卡槽 1】原生默认配置说明：\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 选中的目标配置：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：当前卡的原生配置即为目标配置，处于系统默认状态（无法作为强制锁定生效的判定依据）。"
+                )
+            elif target_b.lower() in cur_b.lower():
+                res = (
+                    f"✅ 【卡槽 1】锁定已成功生效（跨运营商覆盖）！\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 成功锁定目标：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：基带已成功越级挂载目标配置！"
+                )
             else:
                 all_passed = False
-                cur_display = f"{cur_b} ({cur_ver})" if cur_b else "未启用/未识别配置"
-                res = f"❌ 【卡槽 1】尚未命中目标配置！\n   • 当前基带加载：{cur_display}\n   • 期望目标：{target_b}\n   • 对应 IMSI：{imsi1}"
+                res = (
+                    f"❌ 【卡槽 1】锁定尚未生效！\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 期望目标配置：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：基带当前仍挂载原配置，尚未成功覆盖为目标配置。"
+                )
             report_lines.append(res)
             self.log(res.replace("\n", " "))
 
@@ -510,13 +534,38 @@ class CarrierLockGUI:
             cur_ver = sim2.get("bundle_version", "")
             imsi2 = sim2.get("imsi", "")
 
-            passed = (target_b.lower() in cur_b.lower()) if cur_b else False
-            if passed:
-                res = f"✅ 【卡槽 2】锁定已成功生效！\n   • 当前基带加载：{cur_b} ({cur_ver})\n   • 匹配目标：{target_b}\n   • 对应 IMSI：{imsi2}"
+            guess = guess_bundle_for_imsi(imsi2)
+            default_b = guess[0] if guess else ""
+            default_friendly = guess[1] if guess else "未知运营商"
+
+            if not cur_b:
+                res = f"⚠️ 【卡槽 2】未能读取到基带当前配置（SIM 卡可能未就绪或未插卡）"
+                all_passed = False
+            elif target_b.lower() == default_b.lower():
+                res = (
+                    f"ℹ️ 【卡槽 2】原生默认配置说明：\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 选中的目标配置：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：当前卡的原生配置即为目标配置，处于系统默认状态（无法作为强制锁定生效的判定依据）。"
+                )
+            elif target_b.lower() in cur_b.lower():
+                res = (
+                    f"✅ 【卡槽 2】锁定已成功生效（跨运营商覆盖）！\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 成功锁定目标：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：基带已成功越级挂载目标配置！"
+                )
             else:
                 all_passed = False
-                cur_display = f"{cur_b} ({cur_ver})" if cur_b else "未启用/未识别配置"
-                res = f"❌ 【卡槽 2】尚未命中目标配置！\n   • 当前基带加载：{cur_display}\n   • 期望目标：{target_b}\n   • 对应 IMSI：{imsi2}"
+                res = (
+                    f"❌ 【卡槽 2】锁定尚未生效！\n"
+                    f"   • 该卡原生归属：{default_friendly} ({default_b})\n"
+                    f"   • 期望目标配置：{target_b}\n"
+                    f"   • 当前基带实际加载：{cur_b} ({cur_ver})\n"
+                    f"   • 状态：基带当前仍挂载原配置，尚未成功覆盖为目标配置。"
+                )
             report_lines.append(res)
             self.log(res.replace("\n", " "))
 
@@ -526,11 +575,10 @@ class CarrierLockGUI:
 
         final_msg = "\n\n".join(report_lines)
         if all_passed:
-            final_msg += "\n\n🎉 验证成功！所有选中的卡槽均已加载目标运营商配置！"
-            messagebox.showinfo("锁定验证通过", final_msg)
+            messagebox.showinfo("基带配置验证结果", final_msg)
         else:
-            final_msg += "\n\n💡 提示：如果刚刚在手机上执行了锁定，请在手机上下拉控制中心打开【飞行模式】等待 5 秒再关闭，待信号重载后再次点击此按钮验证。"
-            messagebox.showwarning("锁定尚未完全生效", final_msg)
+            final_msg += "\n\n💡 提示：如果刚刚在手机上执行了锁定或恢复，请在手机上下拉控制中心打开【飞行模式】等待 5 秒再关闭，待信号重载后再次点击此按钮验证。"
+            messagebox.showwarning("锁定尚未生效", final_msg)
 
 
 def main():

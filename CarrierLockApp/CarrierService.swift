@@ -121,15 +121,32 @@ final class CarrierService: ObservableObject {
     }
 
     func restore() async {
-        // Airlift FFI exposes write/read but no delete primitive, so the iOS
-        // app cannot remove an overlay link it wrote. Keep the failure
-        // explicit so the user is not misled into thinking restore worked.
-        // Remediation paths: re-run lock with the correct bundle (the write
-        // overwrites the existing link), or wipe the overlay with an iOS
-        // update / full restore.
-        mode = .failed(
-            String(localized: "Restore is not supported: the Airlift interface cannot delete overlay links. To fix a wrong lock, run lock again with the correct bundle (it overwrites the link). An iOS update or full restore clears the overlay.")
-        )
+        guard mode != .locking else { return }
+        do {
+            let imsis = selectedIMSIs
+            guard !imsis.isEmpty else {
+                mode = .idle
+                UserDefaults.standard.removeObject(forKey: Self.lastLockedLinksKey)
+                return
+            }
+
+            // Restore native carrier bundle for each IMSI
+            for imsi in imsis {
+                if let prefix = CarrierDetectionService.prefixCandidate(for: imsi),
+                   let native = CarrierDetectionService.bundle(for: prefix) {
+                    customBundlesByIMSI[imsi] = native
+                } else if let native = detection?.bundleName {
+                    customBundlesByIMSI[imsi] = native
+                }
+            }
+
+            try await run()
+            UserDefaults.standard.removeObject(forKey: Self.lastLockedLinksKey)
+            mode = .idle
+        } catch {
+            mode = .failed(error.localizedDescription)
+            needsAirliftSetup = shouldOfferAirliftSetup(for: error)
+        }
     }
 
     func dismissFailure() {

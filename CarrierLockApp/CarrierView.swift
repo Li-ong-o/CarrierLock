@@ -528,44 +528,55 @@ struct CarrierLockRootView: View {
 
         for slot in slots {
             let activeBundle = slot.activeBundle ?? "未知配置"
-            var matchedExpected = false
             var expectedName = service.bundleName
 
             for imsi in service.selectedIMSIs {
-                let expected = service.bundle(forIMSI: imsi)
-                if expected == slot.activeBundle || (!slot.plmn.isEmpty && slot.plmn.count >= 5 && imsi.hasPrefix(slot.plmn)) {
-                    matchedExpected = true
-                    expectedName = expected
+                if !slot.plmn.isEmpty && slot.plmn.count >= 5 && imsi.hasPrefix(slot.plmn) {
+                    expectedName = service.bundle(forIMSI: imsi)
                     break
                 }
             }
 
+            let defaultBundle = CarrierDetectionService.bundle(for: slot.plmn) ?? ""
+            let isDefaultSameAsTarget = (!defaultBundle.isEmpty && defaultBundle.caseInsensitiveCompare(expectedName) == .orderedSame)
+            let isTargetLoaded = activeBundle.localizedCaseInsensitiveContains(expectedName)
             let syslogMatched = monitor.matchedBundles.contains(expectedName)
 
-            if matchedExpected || syslogMatched {
+            if isDefaultSameAsTarget {
+                var detail = "ℹ️ 【\(slot.slotName)】\(slot.carrierName)"
+                if !slot.plmn.isEmpty { detail += " (\(slot.plmn))" }
+                detail += "\n   • 原生归属配置：\(defaultBundle)"
+                detail += "\n   • 当前选择目标：\(expectedName)"
+                detail += "\n   • 活跃基带挂载：\(activeBundle)"
+                detail += "\n   • 状态说明：当前 SIM 卡原生默认配置即为目标配置，处于系统官方默认运行状态（无需亦无法作为锁定依据）。"
+                lines.append(detail)
+            } else if isTargetLoaded || syslogMatched {
                 var detail = "✅ 【\(slot.slotName)】\(slot.carrierName)"
                 if !slot.plmn.isEmpty { detail += " (\(slot.plmn))" }
-                detail += "\n   • 当前挂载配置：\(activeBundle)"
+                detail += "\n   • 原生归属配置：\(defaultBundle.isEmpty ? "未知" : defaultBundle)"
+                detail += "\n   • 成功锁定目标：\(expectedName)"
+                detail += "\n   • 活跃基带挂载：\(activeBundle)"
                 if syslogMatched {
                     detail += "\n   • 系统底层日志：已捕获 CommCenter 加载 \(expectedName)"
                 }
-                detail += "\n   • 状态：运营商配置锁定已生效！"
+                detail += "\n   • 状态：跨运营商配置锁定已成功生效！"
                 lines.append(detail)
             } else {
                 allPassed = false
                 var detail = "❌ 【\(slot.slotName)】\(slot.carrierName)"
                 if !slot.plmn.isEmpty { detail += " (\(slot.plmn))" }
-                detail += "\n   • 当前挂载：\(activeBundle)"
-                detail += "\n   • 期望目标：\(expectedName)"
-                detail += "\n   • 状态：尚未命中目标配置"
+                detail += "\n   • 原生归属配置：\(defaultBundle.isEmpty ? "未知" : defaultBundle)"
+                detail += "\n   • 期望目标配置：\(expectedName)"
+                detail += "\n   • 活跃基带挂载：\(activeBundle)"
+                detail += "\n   • 状态：尚未生效（当前仍挂载原配置或其他配置）"
                 lines.append(detail)
             }
         }
 
         if allPassed {
-            lines.append("🎉 验证通过：手机当前卡槽已成功挂载目标运营商配置！")
+            lines.append("🎉 验证完成！")
         } else {
-            lines.append("💡 提示：如果刚刚执行了锁定，请下拉控制中心打开【飞行模式】等待 5 秒再关闭，待网络重载后再次点击此按钮验证。")
+            lines.append("💡 提示：如果刚刚执行了锁定或恢复，请下拉控制中心打开【飞行模式】等待 5 秒再关闭，待网络重载后再次点击此按钮验证。")
         }
 
         verificationReport = lines.joined(separator: "\n\n")
