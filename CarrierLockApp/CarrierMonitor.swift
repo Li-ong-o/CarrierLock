@@ -1,14 +1,13 @@
-import AirliftFFI
 import Combine
 import Foundation
+import AirliftFFI
 
 @MainActor
 final class CarrierMonitor: ObservableObject {
     enum State: Equatable {
-        case idle
+        case stopped
         case starting
         case listening
-        case stopped
         case failed(String)
     }
 
@@ -24,7 +23,7 @@ final class CarrierMonitor: ObservableObject {
         let text: String
     }
 
-    @Published private(set) var state: State = .idle
+    @Published private(set) var state: State = .stopped
     @Published private(set) var detection: Detection = .noLogs
     @Published private(set) var detectedAt: Date?
     @Published private(set) var events: [Event] = []
@@ -37,30 +36,28 @@ final class CarrierMonitor: ObservableObject {
 
     private let maximumEvents = 12
     private var isStreaming = false
-    private var expectedBundleName = "CMCC_cn"
+    private var expectedBundles: Set<String> = ["CMCC_cn"]
 
     private init() {}
 
-    func start(expectedBundle: String) {
+    func start(expectedBundles: Set<String>) {
         guard !isStreaming else { return }
 
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
+        guard PairingController.hasValidPairingFile() else {
             state = .failed(String(localized: "Pairing and LocalDevVPN are required for monitoring."))
             return
         }
+        let pairingPath = PairingController.pairingFilePath()
 
         isStreaming = true
         state = .starting
-        expectedBundleName = expectedBundle
+        self.expectedBundles = expectedBundles.isEmpty ? ["CMCC_cn"] : expectedBundles
         detection = .noLogs
         detectedAt = nil
         matchedBundles.removeAll()
         events.removeAll()
 
         nonisolated(unsafe) let context = Unmanaged.passRetained(self).toOpaque()
-        let bundle = expectedBundle
 
         DispatchQueue.global(qos: .userInitiated).async {
             var outputError: UnsafeMutablePointer<CChar>?
@@ -78,9 +75,13 @@ final class CarrierMonitor: ObservableObject {
 
             Task { @MainActor in
                 let monitor = Unmanaged<CarrierMonitor>.fromOpaque(context).takeRetainedValue()
-                monitor.finishStream(bundle: bundle, result: result, message: message)
+                monitor.finishStream(result: result, message: message)
             }
         }
+    }
+
+    func start(expectedBundle: String) {
+        start(expectedBundles: [expectedBundle])
     }
 
     func stop() {
@@ -90,17 +91,20 @@ final class CarrierMonitor: ObservableObject {
         state = .stopped
     }
 
+    func clearCandidates() {
+        imsiCandidates.removeAll()
+    }
+
     func respring() async {
         guard !respringing else { return }
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
+        respringing = true
+        defer { respringing = false }
+
+        guard PairingController.hasValidPairingFile() else {
             state = .failed(String(localized: "Pairing and LocalDevVPN are required for monitoring."))
             return
         }
-
-        respringing = true
-        defer { respringing = false }
+        let pairingPath = PairingController.pairingFilePath()
 
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -128,6 +132,10 @@ final class CarrierMonitor: ObservableObject {
     }
 
     fileprivate func handle(line: String) {
+        if state == .starting {
+            state = .listening
+        }
+
         if line.contains("CommCenter") {
             appendEvent(line)
         }
@@ -151,10 +159,11 @@ final class CarrierMonitor: ObservableObject {
         lastActivityAt = Date()
 
         detectedAt = Date()
-        if bundle == expectedBundleName {
+        if expectedBundles.contains(bundle) {
             detection = .matched(bundle: bundle)
         } else {
-            detection = .mismatch(expected: expectedBundleName, found: bundle)
+            let expectedDisplay = expectedBundles.sorted().joined(separator: ", ")
+            detection = .mismatch(expected: expectedDisplay, found: bundle)
         }
     }
 
@@ -172,7 +181,6 @@ final class CarrierMonitor: ObservableObject {
         let patterns = [
             "Best match found is ",
             "Current bundle ID ",
-            "OperatorBundleChange",
         ]
         for pattern in patterns {
             if let range = line.range(of: pattern) {
@@ -223,21 +231,28 @@ final class CarrierMonitor: ObservableObject {
     }
 
     nonisolated private static func imsiMatches(in line: String) -> [String] {
-        var results: [String] = []
+        var matches: [String] = []
         var current = ""
-        for character in line {
-            if character.isNumber {
-                current.append(character)
+
+        for char in line {
+            if char.isNumber {
+                current.append(char)
             } else {
-                if current.count == 15 { results.append(current) }
-                current = ""
+                if current.count == 15 {
+                    matches.append(current)
+                }
+                current.removeAll(keepingCapacity: true)
             }
         }
-        if current.count == 15 { results.append(current) }
-        return results
+
+        if current.count == 15 {
+            matches.append(current)
+        }
+
+        return matches
     }
 
-    private func finishStream(bundle: String, result: Int32, message: String?) {
+    private func finishStream(result: Int32, message: String?) {
         isStreaming = false
 
         if result == 0 {

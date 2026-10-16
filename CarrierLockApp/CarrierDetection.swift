@@ -49,26 +49,26 @@ enum CarrierDetectionService {
     /// carriers common on MEO/QPESIM setups; anything else falls back to
     /// manual entry.
     private static let bundleByPLMN: [String: String] = [
-        // 中国大陆
+        // 中国大陆（含 46015 中国广电）
         "46000": "CMCC_cn", "46002": "CMCC_cn", "46004": "CMCC_cn",
         "46007": "CMCC_cn", "46008": "CMCC_cn",
-        "46001": "Unicom_cn", "46006": "Unicom_cn", "46009": "Unicom_cn",
-        "46010": "Unicom_cn",
+        "46001": "Unicom_cn", "46006": "Unicom_cn", "46009": "Unicom_cn", "46010": "Unicom_cn",
         "46003": "ChinaTelecom_USIM_cn", "46005": "ChinaTelecom_USIM_cn",
         "46011": "ChinaTelecom_USIM_cn", "46012": "ChinaTelecom_USIM_cn",
-        // 美国运营商（有锁机常见）
-        "310410": "ATT_us", "311180": "ATT_us",
-        "310260": "TMobile_us", "310240": "TMobile_us", "312530": "TMobile_us",
-        "310120": "Sprint_us",
-        "311480": "Verizon_us",
-        // 卡贴常用伪装运营商
-        "23415": "Vodafone_UK",
+        "46015": "CBN_cn",
+        // 美国运营商（修正大小写与实际系统 Bundle 名）
+        "310410": "ATT_US", "311180": "ATT_US",
+        "310260": "TMobile_US", "310240": "TMobile_US", "312530": "TMobile_US",
+        "310120": "Sprint_ISIM_LTE_US",
+        "311480": "Verizon_LTE_US",
+        // 卡贴常用伪装运营商（修正大小写与真实 Bundle 名）
+        "23415": "Vodafone_uk",
         "26202": "Vodafone_de", "26203": "Vodafone_de",
         "21401": "Vodafone_es", "21406": "Vodafone_es",
         "22210": "Vodafone_it",
-        "20801": "Orange_fr", "20802": "Orange_fr",
-        "25001": "MTS_RU", "25002": "MegaFon_RU", "25099": "Beeline_RU",
-        "25701": "MTS_by", "25702": "velcom_by",
+        "20801": "Orange_France", "20802": "Orange_France",
+        "25001": "MTS_ru", "25002": "MegaFon_ru", "25099": "VimpelCom_ru",
+        "25701": "MTS_by", "25702": "mobilkom_by",
     ]
 
     static func detect() -> CarrierDetection {

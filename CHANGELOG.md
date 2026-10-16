@@ -6,26 +6,36 @@ All notable changes to **CarrierLock** are documented in this file.
 
 ### Added
 
-- Pre-write bundle validation: lock targets are checked against the
-  on-device `CarrierBundleList.allBundles` before writing, so a typo or a
-  stale bundle name can no longer create a dead symlink.
+- Multi-bundle and multi-IMSI monitoring support (`monitoredBundleNames: Set<String>`), preventing false `.mismatch` status on dual-SIM devices.
+- Pre-write bundle validation: lock targets are checked against `CarrierBundleCatalog.allSet` with case-insensitive canonical fallback (`CarrierBundleCatalog.canonicalName`).
+- Added China Broadcasting Network (CBN / 中国广电, PLMN 46015 `CBN_cn`) and aligned all 13 international PLMN bundle mappings.
+- Respring state persistence via `UserDefaults` to restore locked IMSIs and status seamlessly after SpringBoard restarts.
+- Strict pairing file validation (`hasValidPairingFile()` / `isValidPairingData()`), preventing corrupt or 0-byte pairing files and validating Plist structure on import.
+- Active session UUID token isolation in `PairingController` to eliminate background C thread races on re-pairing and cancellation.
 
 ### Fixed
 
-- Corrected the PLMN-to-bundle map: China Unicom is `Unicom_cn` (not
-  `China_Unicom`) and China Telecom is `ChinaTelecom_USIM_cn` (not
-  `CTC_china`) on modern iOS; added missing PLMNs 46010 (Unicom) and 46012
-  (Telecom). The guide doc table was updated to match.
-- The "Restore" action now explains the actual limitation (Airlift has no
-  delete primitive) and the real remediation paths, instead of pointing to a
-  `CarrierSIM` tool that is not shipped.
-- Removed the stale `scripts/test-tendies-import.py`, which referenced
-  wallpaper-injection helpers deleted from the app.
+- Corrected all PLMN-to-bundle and preferred bundle entries against on-device `CarrierBundleList.allBundles` (e.g. `Unicom_cn`, `ChinaTelecom_USIM_cn`, `ATT_US`, `TMobile_US`, `Verizon_LTE_US`, `Vodafone_uk`, `Orange_France`).
+- Fixed sheet dismiss bug in `CarrierView`: removed unintentional automatic `service.lock()` execution when dismissing `AirliftSetupView`.
+- Fixed `CarrierMonitor` `.listening` state transition, eliminating infinite "Connecting to syslog..." spinner and warnings.
+- Fixed `CarrierBundlePickerSheet` duplicate item IDs and removed forced uppercase input autocapitalization.
+- Fixed `KeepAlive.startAudio()` guard error branches incorrectly locking `audioRunning = true`.
+- Improved `isLikelyRealIMSI` heuristic to avoid false positives on legitimate SIM cards with adjacent double or sequential digits.
+- Corrected `statusCard` to display locked IMSI mapping details (`imsiDetail`).
+- Corrected LocalNetwork usage description in project configurations from old call recording disclosure tone text.
+- Cleaned up obsolete recording tone and Telegram localization strings.
 
 ### Changed
 
-- Renamed the leftover `TendiesEngine` to `AirliftEngine` (class, file, and
-  call sites); it only does pairing/VPN connectivity checks.
+- Renamed the leftover `TendiesEngine` to `AirliftEngine` (class, file, and call sites).
+- Unified project-level deployment target to iOS 18.0 and corrected product name to `CarrierLock`.
+
+### Removed
+
+- Removed unused `CarrierTransport.readFile` / `readFileSync` dead code and deleted `scripts/airlift-read-file.patch`.
+- Removed stale `scripts/test-tendies-import.py`.
+- Removed unused `sendRespringSignal` from `AirliftEngine`.
+- Removed leftover call recording sound icon asset.
 
 ## [1.0.1] - 2026-10-15
 

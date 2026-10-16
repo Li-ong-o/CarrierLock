@@ -37,9 +37,9 @@ CarrierLock 会监听 CommCenter 的 bundle 选择事件，帮助确认当前使
 
 ## 构建
 
-打开 `carrierlock.xcodeproj`，选择 `carrierlock` target，设置你的签名团队，然后构建到实体设备。
+打开 `CarrierLock.xcodeproj`，选择 `CarrierLock` target，设置你的签名团队，然后构建到实体设备。
 
-如需构建 unsigned IPA，请在 GitHub Actions 中运行 `Release unsigned IPA` 工作流。成品文件名为 `carrierlock-v<version>-unsigned.ipa`。
+如需构建 unsigned IPA，请在 GitHub Actions 中运行 `Release unsigned IPA` 工作流。成品文件名为 `CarrierLock-v<version>-unsigned.ipa`.
 
 ## 致谢 / Credits
 

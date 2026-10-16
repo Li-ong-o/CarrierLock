@@ -6,7 +6,6 @@ AIRCARD_REPO="${AIRCARD_REPO:-https://github.com/mak5er/AirCard-iOS.git}"
 AIRCARD_COMMIT="${AIRCARD_COMMIT:-40640c4d827aeab8d798285b57d24fcf6be070d0}"
 BUILD_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 BUILD_ROOT="$BUILD_PARENT/carrierlock-aircard-$AIRCARD_COMMIT"
-PATCH_FILE="$ROOT/scripts/airlift-read-file.patch"
 
 # AirCard's build script otherwise defaults to a beta Xcode app that is not
 # present on the GitHub runner. setup-xcode has already selected the right one.
@@ -23,8 +22,6 @@ if command -v rustup >/dev/null 2>&1; then
   rustup component add llvm-tools-preview 2>/dev/null || true
 fi
 
-git -C "$BUILD_ROOT" apply --3way "$PATCH_FILE"
-
 "$BUILD_ROOT/build-ios.sh"
 
 rm -rf "$ROOT/Vendor/CarrierLock/AirliftFFI.xcframework"
@@ -36,4 +33,4 @@ cd "$ROOT"
   printf '%s\n' CarrierLockApp/Airlift/GrappaHelper.h CarrierLockApp/Airlift/GrappaHelper.m
 } | LC_ALL=C sort | xargs shasum -a 256 > Vendor/CarrierLock/SHA256SUMS
 
-echo "Built patched AirliftFFI from AirCard-iOS $AIRCARD_COMMIT"
+echo "Built clean AirliftFFI from AirCard-iOS $AIRCARD_COMMIT"

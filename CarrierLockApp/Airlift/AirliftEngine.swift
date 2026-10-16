@@ -47,21 +47,4 @@ public final class AirliftEngine {
             }
         }
     }
-
-    // MARK: - Send Respring Signal via Tunnel
-
-    public func sendRespringSignal(pairingPath: String) async -> Bool {
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                var outError: UnsafeMutablePointer<CChar>? = nil
-                let rc = pairingPath.withCString { pC in
-                    al_device_respring(pC, nil, nil, &outError)
-                }
-                if let p = outError {
-                    al_string_free(p)
-                }
-                continuation.resume(returning: rc == 0)
-            }
-        }
-    }
 }

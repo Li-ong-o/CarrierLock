@@ -37,6 +37,9 @@ final class CarrierService: ObservableObject {
         case failed(String)
     }
 
+    private static let lastLockedLinksKey = "CarrierLock_LastLockedLinks"
+    private static let selectedIMSIsKey = "CarrierLock_SelectedIMSIs"
+
     @Published private(set) var mode: LockMode = .idle
     @Published private(set) var bundleName: String = "CMCC_cn"
     @Published var customBundlesByIMSI: [String: String] = [:]
@@ -47,6 +50,16 @@ final class CarrierService: ObservableObject {
 
     static let shared = CarrierService()
     private init() {
+        // Restore persisted state across Resprings
+        if let persistedLinks = UserDefaults.standard.dictionary(forKey: Self.lastLockedLinksKey) as? [String: String],
+           !persistedLinks.isEmpty {
+            mode = .locked(links: persistedLinks)
+        }
+        if let persistedIMSIs = UserDefaults.standard.stringArray(forKey: Self.selectedIMSIsKey),
+           !persistedIMSIs.isEmpty {
+            detectedIMSIs = persistedIMSIs
+        }
+
         // Carrier detection is informational only. IMSI and bundle are
         // intentionally left for the user to choose; MEP devices often
         // expose the wrong IMSI through the public APIs.
@@ -57,21 +70,33 @@ final class CarrierService: ObservableObject {
         detection = CarrierDetectionService.detect()
     }
 
-    var monitoredBundleName: String {
+    var monitoredBundleNames: Set<String> {
         if case .locked(let links) = mode {
-            return links.values.sorted().first ?? bundleName
+            return Set(links.values)
         }
-        return bundleName
+        if !detectedIMSIs.isEmpty {
+            return Set(detectedIMSIs.map { bundle(forIMSI: $0) })
+        }
+        return Set([bundleName])
+    }
+
+    var monitoredBundleName: String {
+        monitoredBundleNames.sorted().first ?? bundleName
     }
 
     var selectedIMSIs: [String] {
         detectedIMSIs
     }
 
+    func selectBundle(_ name: String) {
+        let canonical = CarrierBundleCatalog.canonicalName(for: name) ?? name
+        bundleName = canonical
+    }
+
     func bundle(forIMSI imsi: String) -> String {
         if let custom = customBundlesByIMSI[imsi]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !custom.isEmpty {
-            return custom
+            return CarrierBundleCatalog.canonicalName(for: custom) ?? custom
         }
 
         if let prefix = CarrierDetectionService.prefixCandidate(for: imsi),
@@ -113,6 +138,7 @@ final class CarrierService: ObservableObject {
     func toggleDetectedIMSI(_ value: String) {
         guard let index = detectedIMSIs.firstIndex(of: value) else { return }
         detectedIMSIs.remove(at: index)
+        persistSelectedIMSIs()
     }
 
     func selectDetectedIMSI(_ value: String) {
@@ -120,6 +146,11 @@ final class CarrierService: ObservableObject {
               !detectedIMSIs.contains(value) else { return }
         detectedIMSIs.append(value)
         detectedIMSIs.sort()
+        persistSelectedIMSIs()
+    }
+
+    private func persistSelectedIMSIs() {
+        UserDefaults.standard.set(detectedIMSIs, forKey: Self.selectedIMSIsKey)
     }
 
     private func run() async throws {
@@ -127,11 +158,10 @@ final class CarrierService: ObservableObject {
             throw CarrierError.unsupported
         }
 
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
+        guard PairingController.hasValidPairingFile() else {
             throw CarrierError.pairingRequired
         }
+        let pairingPath = PairingController.pairingFilePath()
 
         let imsis = selectedIMSIs
         guard !imsis.isEmpty else {
@@ -143,8 +173,10 @@ final class CarrierService: ObservableObject {
             throw CarrierError.invalidIMSI(invalidIMSIs.joined(separator: ", "))
         }
 
-        let links = Dictionary(uniqueKeysWithValues: imsis.map { imsi in
-            (imsi, bundle(forIMSI: imsi))
+        let links = Dictionary(uniqueKeysWithValues: imsis.map { imsi -> (String, String) in
+            let raw = bundle(forIMSI: imsi)
+            let canonical = CarrierBundleCatalog.canonicalName(for: raw) ?? raw
+            return (imsi, canonical)
         })
         let invalidBundles = links.values.filter {
             $0.isEmpty || !$0.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" })
@@ -157,7 +189,7 @@ final class CarrierService: ObservableObject {
         // actually ships (see CarrierBundleList.allBundles). A link to a
         // nonexistent bundle is silently ignored by CommCenter, which makes
         // the lock look successful while doing nothing.
-        let unknownBundles = links.values.filter { !CarrierBundleCatalog.all.contains($0) }
+        let unknownBundles = links.values.filter { !CarrierBundleCatalog.allSet.contains($0) }
         guard unknownBundles.isEmpty else {
             throw CarrierError.invalidBundle(unknownBundles.sorted().joined(separator: ", "))
         }
@@ -174,6 +206,8 @@ final class CarrierService: ObservableObject {
         try await CarrierTransport.shared.write(files: payloads, pairingPath: pairingPath)
 
         mode = .locked(links: links)
+        UserDefaults.standard.set(links, forKey: Self.lastLockedLinksKey)
+        persistSelectedIMSIs()
     }
 
     /// Builds a symlink payload; the transport stages the real link so
@@ -183,12 +217,14 @@ final class CarrierService: ObservableObject {
     }
 
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
-        guard let error = error as? CarrierError else { return false }
-        switch error {
-        case .pairingRequired, .transportFailed:
-            return true
-        case .unsupported, .invalidIMSI, .invalidBundle, .symlinkFailed:
-            return false
+        if let carrierError = error as? CarrierError {
+            switch carrierError {
+            case .pairingRequired, .transportFailed:
+                return true
+            case .unsupported, .invalidIMSI, .invalidBundle, .symlinkFailed:
+                return false
+            }
         }
+        return false
     }
 }

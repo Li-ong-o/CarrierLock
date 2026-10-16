@@ -37,9 +37,9 @@ The software is provided "as is", without any express or implied warranty. The d
 
 ## Build
 
-Open `carrierlock.xcodeproj`, select the `carrierlock` target, set your signing team, and build to a physical device.
+Open `CarrierLock.xcodeproj`, select the `CarrierLock` target, set your signing team, and build to a physical device.
 
-For an unsigned IPA, run the `Release unsigned IPA` workflow in GitHub Actions. The artifact is named `carrierlock-v<version>-unsigned.ipa`.
+For an unsigned IPA, run the `Release unsigned IPA` workflow in GitHub Actions. The artifact is named `CarrierLock-v<version>-unsigned.ipa`.
 
 ## Credits
 

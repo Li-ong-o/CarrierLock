@@ -22,6 +22,9 @@ final class PairingController: ObservableObject {
     @Published var pairingStatus: String = "idle"
     @Published var pairingPIN: String? = nil
 
+    /// Active session ID to isolate background C-thread callbacks from previous sessions.
+    private var activeSessionID = UUID()
+
     /// Path to the pairing file that was actively found or created.
     static var customPairingFilePath: String? = nil
 
@@ -53,6 +56,30 @@ final class PairingController: ObservableObject {
         }
     }
 
+    /// Validates whether given data is non-empty and decodes as a valid Plist dictionary.
+    static func isValidPairingData(_ data: Data) -> Bool {
+        guard !data.isEmpty,
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              !plist.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    /// Checks if a valid non-empty pairing plist exists.
+    static func hasValidPairingFile() -> Bool {
+        let path = pairingFilePath()
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int), size > 0 else {
+            return false
+        }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              isValidPairingData(data) else {
+            return false
+        }
+        return true
+    }
+
     /// Ensures the given pairing file is mirrored to canonical carrierlock_pairing.plist and airlift_pairing.plist.
     @discardableResult
     static func syncCanonicalPairingFile(from sourcePath: String) -> String {
@@ -60,7 +87,7 @@ final class PairingController: ObservableObject {
         let carrierlockURL = dir.appendingPathComponent("carrierlock_pairing.plist")
         let airliftURL = dir.appendingPathComponent("airlift_pairing.plist")
 
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)), !data.isEmpty {
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)), isValidPairingData(data) {
             if sourcePath != carrierlockURL.path {
                 try? data.write(to: carrierlockURL, options: .atomic)
             }
@@ -135,6 +162,7 @@ final class PairingController: ObservableObject {
     func softCancel() {
         stopAdvertising()
         keepAlive.stopAll()
+        activeSessionID = UUID() // invalidate pending callbacks
         running = false
         pairingPIN = nil
         pairingStatus = "Cancelled"
@@ -150,23 +178,25 @@ final class PairingController: ObservableObject {
     func start() {
         stopAdvertising()
         keepAlive.stopAll()
+        let sessionID = UUID()
+        activeSessionID = sessionID
         running = true
         pairingPIN = nil
         pairingStatus = "Starting local host…"
 
         Task {
             _ = await localNetwork.request()
-            guard running else { return }
+            guard running, activeSessionID == sessionID else { return }
 
             keepAlive.startAudio()
             pairingStatus = "Broadcasting… open Settings to pair"
-            runHost()
+            runHost(sessionID: sessionID)
         }
     }
 
     // MARK: - Private
 
-    private func runHost() {
+    private func runHost(sessionID: UUID) {
         let bind = bindAddress
         let name = hostName
         let model = hostModel
@@ -210,7 +240,7 @@ final class PairingController: ObservableObject {
 
             DispatchQueue.main.async {
                 Unmanaged<PairingController>.fromOpaque(ctx).release()
-                self.finish(outcome)
+                self.finish(outcome, sessionID: sessionID)
             }
         }
     }
@@ -220,7 +250,12 @@ final class PairingController: ObservableObject {
         case failure(String)
     }
 
-    private func finish(_ outcome: Outcome) {
+    private func finish(_ outcome: Outcome, sessionID: UUID) {
+        guard sessionID == activeSessionID else {
+            // Stale callback from an earlier cancelled session; ignore
+            return
+        }
+
         stopAdvertising()
         // Keep background alive for 5s so iOS doesn't kill the app before user returns from Settings
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
@@ -249,60 +284,60 @@ final class PairingController: ObservableObject {
 
     // MARK: Bonjour advertising
 
-    fileprivate func startAdvertising(serviceID: String, port: Int32, txt: [String: Data]) {
+    private func startAdvertising(port: Int32) {
         stopAdvertising()
-        let service = NetService(
-            domain: "",
+        let svc = NetService(
+            domain: "local.",
             type: "_remotepairing-pairable-host._tcp.",
-            name: serviceID,
+            name: hostName,
             port: port
         )
-        service.setTXTRecord(NetService.data(fromTXTRecord: txt))
-        service.publish()
-        netService = service
-        pairingStatus = "Advertising — open Settings › Privacy & Security › Developer Mode"
-    }
-
-    fileprivate func presentPin(_ pin: String) {
-        pairingPIN = pin
-        pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with CarrierLock"
+        svc.includesPeerToPeer = true
+        var txt: [String: Data] = [:]
+        txt["name"] = hostName.data(using: .utf8)
+        txt["model"] = hostModel.data(using: .utf8)
+        txt["altIRK"] = Self.storedAltIRK.data(using: .utf8) ?? Data()
+        svc.setTXTRecord(NetService.data(fromTXTRecord: txt))
+        svc.publish()
+        netService = svc
     }
 
     private func stopAdvertising() {
         netService?.stop()
         netService = nil
     }
+
+    fileprivate func onHostReady(port: Int32) {
+        startAdvertising(port: port)
+        pairingStatus = "Host ready on port \(port), advertising…"
+    }
+
+    fileprivate func onPinPrompt(_ pin: String) {
+        pairingPIN = pin
+        pairingStatus = "PIN prompt active"
+    }
 }
 
-// MARK: - C callbacks
+// MARK: - C Callbacks
 
-private let pairReadyCallback: ALPairReadyCb = { ctx, serviceID, port, keys, vals, count in
-    guard let ctx = ctx, let serviceID = serviceID else { return }
+private func cStr(_ p: UnsafePointer<CChar>?) -> String {
+    guard let p = p else { return "" }
+    return String(cString: p)
+}
+
+private let pairReadyCallback: @convention(c) (Int32, UnsafeMutableRawPointer?) -> Void = { port, ctx in
+    guard let ctx = ctx else { return }
     let controller = Unmanaged<PairingController>.fromOpaque(ctx).takeUnretainedValue()
-    let id = String(cString: serviceID)
-
-    var txt: [String: Data] = [:]
-    if let keys = keys, let vals = vals {
-        for i in 0..<Int(count) {
-            guard let k = keys[i], let v = vals[i] else { continue }
-            txt[String(cString: k)] = Data(String(cString: v).utf8)
-        }
-    }
     DispatchQueue.main.async {
-        controller.startAdvertising(serviceID: id, port: Int32(port), txt: txt)
+        controller.onHostReady(port: port)
     }
 }
 
-private let pairPinCallback: ALPairPinCb = { pin, ctx in
-    guard let ctx = ctx, let pin = pin else { return }
+private let pairPinCallback: @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?) -> Void = { pinC, ctx in
+    guard let ctx = ctx else { return }
+    let pin = cStr(pinC)
     let controller = Unmanaged<PairingController>.fromOpaque(ctx).takeUnretainedValue()
-    let pinString = String(cString: pin)
     DispatchQueue.main.async {
-        controller.presentPin(pinString)
+        controller.onPinPrompt(pin)
     }
-}
-
-private func cStr(_ ptr: UnsafeMutablePointer<CChar>?) -> String {
-    guard let ptr = ptr else { return "" }
-    return String(cString: ptr)
 }

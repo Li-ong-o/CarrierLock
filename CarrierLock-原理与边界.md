@@ -131,7 +131,7 @@ QPE 的核心问题通常是“最终服务身份没有拿到正确配置”。�
 
 ```text
 46000XXXXXXXXXXXX -> CMCC_cn.bundle
-46001XXXXXXXXXXXX -> China_Unicom.bundle
+46001XXXXXXXXXXXX -> Unicom_cn.bundle
 ```
 
 不要按“物理卡槽”盲锁，也不要把所有日志里出现过的 IMSI 全部锁上。判断标准是：

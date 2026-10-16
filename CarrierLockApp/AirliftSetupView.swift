@@ -10,9 +10,7 @@ struct CarrierLockAirliftSetupView: View {
     @ObservedObject private var pairing = PairingController.shared
     @StateObject private var wifiMonitor = AirliftWiFiMonitor()
 
-    @State private var paired = FileManager.default.fileExists(
-        atPath: PairingController.pairingFilePath()
-    )
+    @State private var paired = PairingController.hasValidPairingFile()
     @State private var connected = false
     @State private var checking = false
     @State private var pairingError: String?
@@ -236,13 +234,13 @@ struct CarrierLockAirliftSetupView: View {
                 url.stopAccessingSecurityScopedResource()
             }
         }
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
-            pairingError = "选择的文件为空，或无法读取。"
+        guard let data = try? Data(contentsOf: url), PairingController.isValidPairingData(data) else {
+            pairingError = "选择的文件不是合法的配对 Plist 文件或内容为空。"
             return
         }
         let adopted = PairingController.syncCanonicalPairingFile(from: url.path)
         CarrierLockLog.shared.append("imported pairing file: \(url.lastPathComponent)")
-        if FileManager.default.fileExists(atPath: adopted) {
+        if PairingController.hasValidPairingFile() {
             paired = true
             connectionError = nil
         } else {

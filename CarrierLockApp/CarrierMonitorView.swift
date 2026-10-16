@@ -51,7 +51,7 @@ struct CarrierMonitorView: View {
                     .buttonStyle(.borderedProminent)
                 } else {
                     Button {
-                        monitor.start(expectedBundle: service.monitoredBundleName)
+                        monitor.start(expectedBundles: service.monitoredBundleNames)
                     } label: {
                         Label("开始监听", systemImage: "play.fill")
                             .frame(maxWidth: .infinity)
@@ -298,12 +298,44 @@ struct CarrierMonitorView: View {
         guard let prefix = CarrierDetectionService.prefixCandidate(for: imsi),
               CarrierDetectionService.bundle(for: prefix) != nil else { return false }
 
-        // Adapter-generated identities often contain recognizable repetition.
-        let middle = imsi.dropFirst(prefix.count).dropLast()
+        // Adapter-generated identities often contain obvious artificial repetition (e.g. 000, 888)
+        // or straight ascending/descending sequences (e.g. 1234, 4321).
+        let middle = String(imsi.dropFirst(prefix.count).dropLast())
         guard middle.count >= 6 else { return false }
         let digits = middle.compactMap { $0.wholeNumberValue }
-        let hasRun = zip(digits, digits.dropFirst()).contains { $0 == $1 }
-        let hasSequence = zip(digits, digits.dropFirst()).contains { $1 == $0 + 1 }
-        return !hasRun && !hasSequence
+
+        // Check for 3 or more repeated digits
+        var maxRepeat = 1
+        var currentRepeat = 1
+        for i in 1..<digits.count {
+            if digits[i] == digits[i - 1] {
+                currentRepeat += 1
+                maxRepeat = max(maxRepeat, currentRepeat)
+            } else {
+                currentRepeat = 1
+            }
+        }
+        if maxRepeat >= 3 { return false }
+
+        // Check for 4 or more sequential digits
+        var maxAsc = 1, currentAsc = 1
+        var maxDesc = 1, currentDesc = 1
+        for i in 1..<digits.count {
+            if digits[i] == digits[i - 1] + 1 {
+                currentAsc += 1
+                maxAsc = max(maxAsc, currentAsc)
+            } else {
+                currentAsc = 1
+            }
+            if digits[i] == digits[i - 1] - 1 {
+                currentDesc += 1
+                maxDesc = max(maxDesc, currentDesc)
+            } else {
+                currentDesc = 1
+            }
+        }
+        if maxAsc >= 4 || maxDesc >= 4 { return false }
+
+        return true
     }
 }

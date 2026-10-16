@@ -227,7 +227,7 @@
 				<key>GCC_WARN_UNUSED_VARIABLE</key>
 				<string>YES</string>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
-				<string>27.0</string>
+				<string>18.0</string>
 				<key>LOCALIZATION_PREFERS_STRING_CATALOGS</key>
 				<string>YES</string>
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
@@ -353,7 +353,7 @@
 				<key>GCC_WARN_UNUSED_VARIABLE</key>
 				<string>YES</string>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
-				<string>27.0</string>
+				<string>18.0</string>
 				<key>LOCALIZATION_PREFERS_STRING_CATALOGS</key>
 				<string>YES</string>
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
@@ -399,7 +399,7 @@
 			<key>name</key>
 			<string>CarrierLock</string>
 			<key>productName</key>
-			<string>MyApp</string>
+			<string>CarrierLock</string>
 			<key>productReference</key>
 			<string>000000000000000000000120</string>
 			<key>productType</key>
@@ -440,7 +440,7 @@
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
 				<string>CarrierLock</string>
 				<key>INFOPLIST_KEY_NSLocalNetworkUsageDescription</key>
-				<string>CarrierLock applies call recording disclosure tone changes using system container access.</string>
+				<string>CarrierLock uses the local network to pair with this device and communicate with LocalDevVPN.</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]</key>
@@ -541,7 +541,7 @@
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
 				<string>CarrierLock</string>
 				<key>INFOPLIST_KEY_NSLocalNetworkUsageDescription</key>
-				<string>CarrierLock applies call recording disclosure tone changes using system container access.</string>
+				<string>CarrierLock uses the local network to pair with this device and communicate with LocalDevVPN.</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]</key>

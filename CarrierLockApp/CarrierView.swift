@@ -7,7 +7,7 @@ struct CarrierLockRootView: View {
     @State private var showingAirliftSetup = false
     @State private var showingBundlePicker = false
     @State private var editingIMSI: String?
-    @State private var showingStartupGate = true
+    @State private var showingStartupGate = !PairingController.hasValidPairingFile()
     @State private var confirmingLock = false
 
     var body: some View {
@@ -63,7 +63,7 @@ struct CarrierLockRootView: View {
             CarrierLockAboutView()
         }
         .sheet(isPresented: $showingAirliftSetup, onDismiss: {
-            Task { await service.lock() }
+            service.dismissFailure()
         }) {
             CarrierLockAirliftSetupView()
         }
@@ -303,7 +303,7 @@ struct CarrierLockRootView: View {
         case .locking:
             "正在写入运营商配置链接。"
         case .locked:
-            "上次写入已生效。请勿把它当作当前选择。"
+            imsiDetail.isEmpty ? "已成功锁定运营商配置。" : "已锁定：\(imsiDetail)"
         case .failed:
             "上次操作失败，请检查错误后重试。"
         }
@@ -349,10 +349,32 @@ private struct CarrierBundlePickerSheet: View {
     @State private var customMode = false
     @State private var customBundle = ""
 
-    private var bundles: [String] {
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var filteredBundles: [String] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return CarrierBundleCatalog.preferred + CarrierBundleCatalog.all }
+        guard !query.isEmpty else { return [] }
         return CarrierBundleCatalog.all.filter { $0.lowercased().contains(query) }
+    }
+
+    @ViewBuilder
+    private func bundleRow(_ bundle: String) -> some View {
+        Button {
+            bundleName = bundle
+            dismiss()
+        } label: {
+            HStack {
+                Text(bundle)
+                    .font(.callout.monospaced())
+                Spacer()
+                if bundle == bundleName {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -380,12 +402,14 @@ private struct CarrierBundlePickerSheet: View {
 
                     if customMode {
                         TextField("Bundle 名称", text: $customBundle)
-                            .textInputAutocapitalization(.characters)
+                            .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .monospaced()
 
                         Button("使用自定义 Bundle") {
-                            bundleName = customBundle.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let input = customBundle.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let canonical = CarrierBundleCatalog.canonicalName(for: input) ?? input
+                            bundleName = canonical
                             dismiss()
                         }
                         .disabled(!isValid)
@@ -393,21 +417,22 @@ private struct CarrierBundlePickerSheet: View {
                 }
 
                 if !customMode {
-                    Section("运营商配置") {
-                        ForEach(bundles, id: \.self) { bundle in
-                            Button {
-                                bundleName = bundle
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Text(bundle)
-                                        .font(.callout.monospaced())
-                                    Spacer()
-                                    if bundle == bundleName {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.tint)
-                                    }
-                                }
+                    if isSearching {
+                        Section("搜索结果") {
+                            ForEach(filteredBundles, id: \.self) { bundle in
+                                bundleRow(bundle)
+                            }
+                        }
+                    } else {
+                        Section("常用配置") {
+                            ForEach(CarrierBundleCatalog.preferred, id: \.self) { bundle in
+                                bundleRow(bundle)
+                            }
+                        }
+
+                        Section("全部配置") {
+                            ForEach(CarrierBundleCatalog.all, id: \.self) { bundle in
+                                bundleRow(bundle)
                             }
                         }
                     }

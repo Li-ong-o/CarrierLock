@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CarrierLockAboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var log = CarrierLockLog.shared
 
     var body: some View {
         NavigationStack {
@@ -76,11 +77,11 @@ struct CarrierLockAboutView: View {
                     Label("日志包含配对、回环连接和 AirLift 文件操作。", systemImage: "list.bullet.rectangle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    ShareLink(item: CarrierLockLog.shared.exportText()) {
+                    ShareLink(item: log.exportText()) {
                         Label("导出日志", systemImage: "square.and.arrow.up")
                     }
                     Button("清空日志", role: .destructive) {
-                        CarrierLockLog.shared.clear()
+                        log.clear()
                     }
                     .font(.footnote)
                 }

@@ -19,19 +19,6 @@ actor CarrierTransport {
         var linkTarget: String?
     }
 
-    func readFile(path: String, pairingPath: String) async throws -> Data? {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let result = try Self.readFileSync(path: path, pairingPath: pairingPath)
-                    continuation.resume(returning: result)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
     func write(files: [Payload], pairingPath: String) async throws {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -97,38 +84,5 @@ actor CarrierTransport {
         guard result == 0 else {
             throw CarrierError.transportFailed(message ?? "AirLift write failed (\(result)).")
         }
-    }
-
-    private static func readFileSync(path: String, pairingPath: String) throws -> Data? {
-        var bytes: UnsafeMutablePointer<UInt8>?
-        var length = 0
-        var outputError: UnsafeMutablePointer<CChar>?
-        let result = pairingPath.withCString { pairingCString in
-            path.withCString { pathCString in
-                al_exploit_read_file(
-                    pairingCString,
-                    pathCString,
-                    CarrierLockLog.ffiCallback,
-                    nil,
-                    &bytes,
-                    &length,
-                    &outputError
-                )
-            }
-        }
-
-        let message = outputError.map { String(cString: $0) }
-        if let outputError { al_string_free(outputError) }
-        defer {
-            if let bytes, length > 0 {
-                al_bytes_free(bytes, length)
-            }
-        }
-
-        guard result == 0 else {
-            throw CarrierError.transportFailed(message ?? "AirLift read failed (\(result)).")
-        }
-        guard let bytes else { return nil }
-        return Data((0..<length).map { bytes[$0] })
     }
 }

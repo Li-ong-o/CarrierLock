@@ -1,34 +1,52 @@
+import Combine
 import Foundation
 
 /// Thread-safe runtime log collector.
 ///
 /// The Rust/FFI layer calls the C log callback from arbitrary threads, so
 /// writes are guarded by a lock and the UI drains the buffer on demand.
-final class CarrierLockLog {
+final class CarrierLockLog: ObservableObject {
     static let shared = CarrierLockLog()
 
     private let lock = NSLock()
     private var lines: [String] = []
     private let capacity = 1000
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    @Published private(set) var updateToken: Int = 0
 
     private init() {}
 
     /// Append a line from any thread.
     func append(_ line: String) {
         lock.lock()
-        defer { lock.unlock() }
         lines.append(line)
         if lines.count > capacity {
             lines.removeFirst(lines.count - capacity)
+        }
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.updateToken &+= 1
         }
     }
 
     /// Return all collected lines so far and clear the buffer.
     func drain() -> [String] {
         lock.lock()
-        defer { lock.unlock() }
         let out = lines
         lines.removeAll()
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.updateToken &+= 1
+        }
         return out
     }
 
@@ -41,15 +59,20 @@ final class CarrierLockLog {
 
     /// Timestamped log text for exporting / sharing.
     func exportText() -> String {
-        let stamp = ISO8601DateFormatter().string(from: Date())
+        let stamp = Self.dateFormatter.string(from: Date())
         let body = snapshot().joined(separator: "\n")
         return "CarrierLock log — \(stamp)\n----------------------------\n\(body)"
     }
 
     func clear() {
         lock.lock()
-        defer { lock.unlock() }
         lines.removeAll()
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.updateToken &+= 1
+        }
     }
 }
 

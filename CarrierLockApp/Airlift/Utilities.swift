@@ -1,9 +1,8 @@
 import Foundation
 import AVFAudio
-import CoreLocation
 import Network
 
-// MARK: - Keep-alive (audio + optional location)
+// MARK: - Keep-alive (audio)
 
 /// Keeps the app running in the background while the user approves the pairing
 /// PIN in Settings → Developer Mode.
@@ -26,7 +25,7 @@ final class KeepAlive: NSObject {
             }
             let format = engine.outputNode.inputFormat(forBus: 0)
             guard format.sampleRate > 0 && format.channelCount > 0 else {
-                audioRunning = true
+                audioRunning = false
                 return
             }
 
@@ -34,7 +33,7 @@ final class KeepAlive: NSObject {
 
             let frames = max(1024, AVAudioFrameCount(format.sampleRate))
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
-                audioRunning = true
+                audioRunning = false
                 return
             }
             buffer.frameLength = frames
