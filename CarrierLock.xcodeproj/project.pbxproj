@@ -426,7 +426,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>6</string>
+				<string>7</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>ZCJRYKUHZ6</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -476,7 +476,7 @@
 				<key>LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]</key>
 				<string>@executable_path/../Frameworks</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0.2</string>
+				<string>1.0.3</string>
 				<key>OTHER_LDFLAGS</key>
 				<array>
 					<string>$(inherited)</string>
@@ -527,7 +527,7 @@
 				<key>CODE_SIGN_STYLE</key>
 				<string>Automatic</string>
 				<key>CURRENT_PROJECT_VERSION</key>
-				<string>6</string>
+				<string>7</string>
 				<key>DEVELOPMENT_TEAM</key>
 				<string>ZCJRYKUHZ6</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -577,7 +577,7 @@
 				<key>LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]</key>
 				<string>@executable_path/../Frameworks</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0.2</string>
+				<string>1.0.3</string>
 				<key>OTHER_LDFLAGS</key>
 				<array>
 					<string>$(inherited)</string>

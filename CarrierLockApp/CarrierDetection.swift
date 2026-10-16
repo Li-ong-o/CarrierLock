@@ -73,23 +73,25 @@ enum CarrierDetectionService {
 
     static func detect() -> CarrierDetection {
         var result = CarrierDetection()
-
         let info = CTTelephonyNetworkInfo()
 
-        // iOS 12+ splits per eSIM/physical-SIM service. Try both spellings of
-        // the API across OS versions; only one will be populated.
-        // CTCarrier's MCC/MNC accessors are deprecated but still the only
-        // public CoreTelephony surface that reports them without entitlements.
-        // They work on iOS 18/26 for the active subscription.
-        applyCarrier(info.subscriberCellularProvider, to: &result)
+        // Modern iOS 12+ multi-SIM providers
+        if let providers = info.serviceSubscriberCellularProviders {
+            for (_, carrier) in providers {
+                applyCarrier(carrier, to: &result)
+                if result.bundleName != nil { break }
+            }
+        }
+        if result.bundleName == nil {
+            applyCarrier(info.subscriberCellularProvider, to: &result)
+        }
 
-        if result.source == .unknown, result.imsiPrefix != nil {
+        if result.source == .unknown, (result.imsiPrefix != nil || result.bundleName != nil) {
             result.source = .carrierInfo
         }
-        // CoreTelephony reports 65535 as a placeholder when the real PLMN is
-        // unavailable (common on MEP setups). Hide that noise entirely.
         if result.mcc == "65535" || result.mnc == "65535" {
-            result = CarrierDetection()
+            result.mcc = nil
+            result.mnc = nil
         }
         return result
     }
@@ -111,10 +113,28 @@ enum CarrierDetectionService {
 
     private static func applyCarrier(_ carrier: CTCarrier?, to result: inout CarrierDetection) {
         guard let carrier else { return }
-        if let mcc = carrier.mobileCountryCode, !mcc.isEmpty { result.mcc = mcc }
-        if let mnc = carrier.mobileNetworkCode, !mnc.isEmpty { result.mnc = mnc }
+        if let mcc = carrier.mobileCountryCode, !mcc.isEmpty, mcc != "65535" { result.mcc = mcc }
+        if let mnc = carrier.mobileNetworkCode, !mnc.isEmpty, mnc != "65535" { result.mnc = mnc }
         if let prefix = result.imsiPrefix {
             result.bundleName = bundleByPLMN[prefix] ?? result.bundleName
+        }
+        // Carrier name heuristic fallback (handles iOS 16.4+ where PLMN is obscured)
+        if result.bundleName == nil, let name = carrier.carrierName {
+            if name.contains("广电") {
+                result.bundleName = "CBN_cn"
+            } else if name.contains("移动") {
+                result.bundleName = "CMCC_cn"
+            } else if name.contains("联通") {
+                result.bundleName = "Unicom_cn"
+            } else if name.contains("电信") {
+                result.bundleName = "ChinaTelecom_USIM_cn"
+            } else if name.localizedCaseInsensitiveContains("AT&T") {
+                result.bundleName = "ATT_US"
+            } else if name.localizedCaseInsensitiveContains("T-Mobile") {
+                result.bundleName = "TMobile_US"
+            } else if name.localizedCaseInsensitiveContains("Verizon") {
+                result.bundleName = "Verizon_LTE_US"
+            }
         }
     }
 }

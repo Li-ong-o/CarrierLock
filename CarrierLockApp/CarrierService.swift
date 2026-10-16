@@ -68,6 +68,9 @@ final class CarrierService: ObservableObject {
 
     func detectCarrier() {
         detection = CarrierDetectionService.detect()
+        if let detectedBundle = detection?.bundleName, !detectedBundle.isEmpty {
+            bundleName = detectedBundle
+        }
     }
 
     var monitoredBundleNames: Set<String> {
@@ -138,6 +141,7 @@ final class CarrierService: ObservableObject {
     func toggleDetectedIMSI(_ value: String) {
         guard let index = detectedIMSIs.firstIndex(of: value) else { return }
         detectedIMSIs.remove(at: index)
+        customBundlesByIMSI.removeValue(forKey: value)
         persistSelectedIMSIs()
     }
 
@@ -146,6 +150,13 @@ final class CarrierService: ObservableObject {
               !detectedIMSIs.contains(value) else { return }
         detectedIMSIs.append(value)
         detectedIMSIs.sort()
+
+        // Auto-assign corresponding bundle if known for this PLMN
+        if let prefix = CarrierDetectionService.prefixCandidate(for: value),
+           let autoBundle = CarrierDetectionService.bundle(for: prefix) {
+            customBundlesByIMSI[value] = autoBundle
+        }
+
         persistSelectedIMSIs()
     }
 

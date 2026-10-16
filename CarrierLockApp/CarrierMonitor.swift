@@ -238,14 +238,14 @@ final class CarrierMonitor: ObservableObject {
             if char.isNumber {
                 current.append(char)
             } else {
-                if current.count == 15 {
+                if current.count == 15, !current.hasPrefix("35"), !current.hasPrefix("86"), !current.hasPrefix("01") {
                     matches.append(current)
                 }
                 current.removeAll(keepingCapacity: true)
             }
         }
 
-        if current.count == 15 {
+        if current.count == 15, !current.hasPrefix("35"), !current.hasPrefix("86"), !current.hasPrefix("01") {
             matches.append(current)
         }
 
@@ -277,7 +277,14 @@ private let monitorLineCallback: @convention(c) (UnsafeMutableRawPointer?, Unsaf
         line.contains("Best match found is ") ||
         line.contains("Current bundle ID ") ||
         line.contains("carrier_bundle slot") ||
-        line.contains(" is already covered")
+        line.contains(" is already covered") ||
+        line.contains("460") ||
+        line.contains("CIMI") ||
+        line.contains("telephony") ||
+        line.contains("Telephony") ||
+        line.contains("sim_app") ||
+        line.contains("bb_") ||
+        line.contains("baseband")
     guard relevant else { return }
 
     Task { @MainActor in

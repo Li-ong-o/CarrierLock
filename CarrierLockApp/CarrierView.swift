@@ -11,6 +11,7 @@ struct CarrierLockRootView: View {
     @State private var confirmingLock = false
     @State private var showingManualIMSIInput = false
     @State private var manualIMSI = ""
+    @State private var showingIMEIWarning = false
 
     var body: some View {
         NavigationStack {
@@ -90,13 +91,28 @@ struct CarrierLockRootView: View {
         .alert("手动添加 IMSI", isPresented: $showingManualIMSIInput) {
             TextField("输入 15 位 IMSI", text: $manualIMSI)
                 .keyboardType(.numberPad)
+            Button("从剪贴板粘贴") {
+                pasteIMSIFromClipboard()
+            }
             Button("添加") {
-                let trimmed = manualIMSI.trimmingCharacters(in: .whitespacesAndNewlines)
-                service.selectDetectedIMSI(trimmed)
+                commitManualIMSI()
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("请输入完整的 15 位数字 SIM 卡 IMSI（例如 46000XXXXXXXXXX）。如果已知本机 IMSI，可在此直接添加。")
+            Text("请输入完整的 15 位数字 SIM 卡 IMSI（国内通常以 460 开头）。可在爱思助手【设备详情】或下方监听中获取。")
+        }
+        .alert("疑似输入了 IMEI (手机串号)", isPresented: $showingIMEIWarning) {
+            Button("仍然添加", role: .destructive) {
+                let trimmed = manualIMSI.trimmingCharacters(in: .whitespacesAndNewlines)
+                service.selectDetectedIMSI(trimmed)
+            }
+            Button("重新输入", role: .cancel) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showingManualIMSIInput = true
+                }
+            }
+        } message: {
+            Text("您输入的号码以 35/86 开头，这是 iPhone 的硬件串号 (IMEI) 而非 SIM 卡的 IMSI。国内 SIM 卡的 IMSI 必定以 460 开头（可在电脑爱思助手【查看设备详情】中复制 InternationalMobileSubscriberIdentity）。锁定 IMEI 无法生效。")
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
             CarrierStartupGateView(onContinue: {
@@ -446,6 +462,35 @@ struct CarrierLockRootView: View {
                 .joined(separator: "、")
         }
         return ""
+    }
+
+    private func pasteIMSIFromClipboard() {
+        guard let clip = UIPasteboard.general.string else { return }
+        let all15Digits = clip.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { $0.count == 15 }
+        if let imsiMatch = all15Digits.first(where: { $0.hasPrefix("460") }) {
+            manualIMSI = imsiMatch
+            return
+        }
+        let digitsOnly = clip.filter(\.isNumber)
+        if digitsOnly.count == 15 {
+            manualIMSI = digitsOnly
+            return
+        }
+        if let any15 = all15Digits.first {
+            manualIMSI = any15
+            return
+        }
+        manualIMSI = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func commitManualIMSI() {
+        let trimmed = manualIMSI.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 15, trimmed.allSatisfy(\.isNumber) else { return }
+        if trimmed.hasPrefix("35") || trimmed.hasPrefix("86") {
+            showingIMEIWarning = true
+        } else {
+            service.selectDetectedIMSI(trimmed)
+        }
     }
 }
 

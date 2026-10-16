@@ -70,7 +70,7 @@ struct CarrierMonitorView: View {
             }
 
             if monitor.state != .listening {
-                Text("如果长期没有 bundle lookup，请点“开始监听”后再点“重启桌面”强制 CommCenter 重新匹配。国家/地区 Map（如 China_Map）不参与锁定判定。")
+                Text("刷新技巧：点“开始监听”后，下拉控制中心打开【飞行模式】等待 5 秒再关闭，即可安全触发 CommCenter 重新读卡，无需重启手机。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -79,16 +79,16 @@ struct CarrierMonitorView: View {
         .padding(16)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
         .confirmationDialog(
-            "立即重启桌面？",
+            "重启设备/桌面？",
             isPresented: $confirmingRespring,
             titleVisibility: .visible
         ) {
-            Button("重启桌面", role: .destructive) {
+            Button("重启设备/桌面", role: .destructive) {
                 Task { await monitor.respring() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("SpringBoard 会重启，CommCenter 会重新扫描运营商配置。CarrierLock 会短暂关闭。")
+            Text("注意：iOS 18+ 系统上该操作会触发手机重启，重启后需重新连接 LocalDevVPN。如果仅需刷新运营商信号，更推荐下拉控制中心【开关飞行模式】。")
         }
     }
 
@@ -100,8 +100,8 @@ struct CarrierMonitorView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 guideRow(1, "在 CarrierLock 点击“开始监听”")
-                guideRow(2, "切到卡贴程序，刷新一次 SIM 卡信号")
-                guideRow(3, "回到这里，点选日志捕获到的真实 IMSI")
+                guideRow(2, "下拉控制中心开关一次飞行模式（或在卡贴刷新信号）")
+                guideRow(3, "回到这里，点选日志捕获到的真实 460... IMSI")
                 guideRow(4, "确认 bundle 后点击“锁定运营商配置”")
             }
         }
