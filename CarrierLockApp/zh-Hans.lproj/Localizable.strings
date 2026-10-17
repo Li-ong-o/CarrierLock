@@ -30,6 +30,13 @@
 "Could not build carrier bundle link: %@" = "无法生成运营商配置链接：%@";
 "AirLift write failed: %@" = "AirLift 写入失败：%@";
 "Cannot reach the AirLift tunnel. Make sure Wi-Fi is connected and LocalDevVPN is active, then retry.\n\nTechnical details: %@" = "无法连接 AirLift 隧道。请确认 iPhone 已连接 Wi-Fi，并已开启 LocalDevVPN 后重试。\n\n技术详情：%@";
+"Carrier directory verification is temporarily unavailable: %@\n\nThe write operation may have completed. Wait a few seconds, then tap Check Lock Status again." = "运营商目录验证暂时不可用：%@\n\n写入操作可能已经完成。请稍等几秒后再点击“检查锁定状态”。";
+"写入已完成，但目录验证暂时失败，可能已锁定。请稍后点击“检查锁定状态”确认。技术详情：%@" = "写入已完成，但目录验证暂时失败，可能已锁定。请稍后点击“检查锁定状态”确认。技术详情：%@";
+"正在检测运营商目录读取能力…" = "正在检测运营商目录读取能力…";
+"缺少配对文件，无法完成写入前检测。" = "缺少配对文件，无法完成写入前检测。";
+"预检无法读取运营商目录：%@\n\n建议先打开 Apple Books 并稍等，或重启后再试。继续写入时，App 可能只能显示“写入完成但无法验证”。" = "预检无法读取运营商目录：%@\n\n建议先打开 Apple Books 并稍等，或重启后再试。继续写入时，App 可能只能显示“写入完成但无法验证”。";
+"仍然写入链接" = "仍然写入链接";
+"目录读取预检失败" = "目录读取预检失败";
 "Pair this iPhone and connect LocalDevVPN before locking the carrier profile." = "锁定运营商配置前，请先配对 iPhone 并连接 LocalDevVPN。";
 "Bundle name must match a folder under /System/Library/Carrier Bundles/iPhone." = "bundle 名称必须对应 /System/Library/Carrier Bundles/iPhone 下的文件夹。";
 "The IMSI symlink is written to /var/mobile/Library/Carrier Bundles/Overlay." = "IMSI 符号链接会写入 /var/mobile/Library/Carrier Bundles/Overlay。";

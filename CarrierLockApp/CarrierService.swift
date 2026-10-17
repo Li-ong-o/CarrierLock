@@ -10,6 +10,7 @@ enum CarrierError: LocalizedError {
     case symlinkFailed(String)
     case transportFailed(String)
     case connectionFailed(String)
+    case directoryReadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum CarrierError: LocalizedError {
             String(format: String(localized: "AirLift write failed: %@"), reason)
         case .connectionFailed(let reason):
             String(format: String(localized: "Cannot reach the AirLift tunnel. Make sure Wi-Fi is connected and LocalDevVPN is active, then retry.\n\nTechnical details: %@"), reason)
+        case .directoryReadFailed(let reason):
+            String(format: String(localized: "Carrier directory verification is temporarily unavailable: %@\n\nThe write operation may have completed. Wait a few seconds, then tap Check Lock Status again."), reason)
         }
     }
 }
@@ -49,6 +52,8 @@ final class CarrierService: ObservableObject {
     @Published private(set) var detection: CarrierDetection?
     @Published private(set) var verifiedLinks: [String: String] = [:]
     @Published private(set) var verifyMessage: String?
+    @Published private(set) var isCheckingStatus = false
+    @Published private(set) var preflightMessage: String?
 
     static let shared = CarrierService()
     private init() {
@@ -121,16 +126,17 @@ final class CarrierService: ObservableObject {
                 throw CarrierError.transportFailed("AirLift restore returned no result.")
             }
 
-            let links = try await readLockLinks(pairingPath: pairingPath)
-            guard links.isEmpty else {
-                throw CarrierError.transportFailed("Restore verification found \(links.count) IMSI link(s).")
-            }
-
             verifiedLinks = [:]
-            verifyMessage = result.changed
-                ? String(format: String(localized: "已移除 %d 个 IMSI 链接，并完成二次校验。"), result.removed)
-                : String(localized: "当前已经是默认配置，未发现 IMSI 链接。")
+            if result.changed {
+                verifyMessage = String(
+                    format: String(localized: "已移除 %d 个 IMSI 链接。请稍等几秒后点击“检查锁定状态”确认。"),
+                    result.removed
+                )
+            } else {
+                verifyMessage = String(localized: "当前已经是默认配置，未发现 IMSI 链接。")
+            }
             CarrierLockLog.shared.append("[恢复] 成功：\(verifyMessage ?? "")")
+            CarrierLockLog.shared.append("[恢复] FFI 结果：before=\(result.before), removed=\(result.removed), after=\(result.after)")
             mode = .idle
         } catch {
             let normalizedError = Self.normalizeTransportError(error)
@@ -149,7 +155,9 @@ final class CarrierService: ObservableObject {
     }
 
     func checkLockStatus() async {
-        guard mode != .locking else { return }
+        guard mode != .locking, !isCheckingStatus else { return }
+        isCheckingStatus = true
+        defer { isCheckingStatus = false }
         CarrierLockLog.shared.append("[检查] 开始读取运营商配置目录")
         verifyMessage = nil
         verifiedLinks = [:]
@@ -183,6 +191,36 @@ final class CarrierService: ObservableObject {
         }
     }
 
+    /// Check that AirTraffic can currently export and enumerate the carrier
+    /// directory before allowing a new overlay write.
+    func preflightLockDirectory() async -> Bool {
+        preflightMessage = nil
+        CarrierLockLog.shared.append("[预检] 开始检测运营商目录读取能力")
+
+        let pairingPath = PairingController.pairingFilePath()
+        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
+        guard size > 0 else {
+            preflightMessage = String(localized: "缺少配对文件，无法完成写入前检测。")
+            CarrierLockLog.shared.append("[预检] 失败：缺少配对文件")
+            return false
+        }
+
+        busyMessage = String(localized: "正在检测运营商目录读取能力…")
+        defer { busyMessage = nil }
+
+        do {
+            let links = try await readLockLinks(pairingPath: pairingPath)
+            CarrierLockLog.shared.append("[预检] 成功：目录可读取，当前 IMSI 链接数 \(links.count)")
+            return true
+        } catch {
+            let normalizedError = Self.normalizeTransportError(error)
+            preflightMessage = normalizedError.localizedDescription
+            CarrierLockLog.shared.append("[预检] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[预检] 原始错误：\(error.localizedDescription)")
+            return false
+        }
+    }
+
     struct RestoreResult: Codable {
         let ok: Bool
         let changed: Bool
@@ -210,6 +248,12 @@ final class CarrierService: ObservableObject {
            reason.localizedCaseInsensitiveContains("RemoteXPC timed out")
             || reason.localizedCaseInsensitiveContains("loopback VPN") {
             return .connectionFailed(reason)
+        }
+
+        if case .transportFailed(let reason) = carrierError,
+           reason.localizedCaseInsensitiveContains("did not export")
+            || reason.localizedCaseInsensitiveContains("AssetManifest not observed") {
+            return .directoryReadFailed(reason)
         }
 
         return carrierError
@@ -268,6 +312,9 @@ final class CarrierService: ObservableObject {
     func selectDetectedIMSI(_ value: String) {
         guard value.count == 15, value.allSatisfy(\.isNumber),
               !detectedIMSIs.contains(value) else { return }
+        // Re-selecting a captured IMSI restores PLMN-based resolution. This
+        // prevents an old manual override from silently winning on retry.
+        customBundlesByIMSI[value] = nil
         detectedIMSIs.append(value)
         detectedIMSIs.sort()
     }
@@ -324,15 +371,28 @@ final class CarrierService: ObservableObject {
             try await CarrierTransport.shared.write(files: [payload], pairingPath: pairingPath)
         }
 
-        let verified = try await readLockLinks(pairingPath: pairingPath)
-        let missing = links.filter { verified[$0.key] != $0.value }
-        guard missing.isEmpty else {
-            throw CarrierError.symlinkFailed("written links not found in readback: \(missing.keys.sorted().joined(separator: ", "))")
-        }
+        do {
+            let verified = try await readLockLinks(pairingPath: pairingPath)
+            let missing = links.filter { verified[$0.key] != $0.value }
+            guard missing.isEmpty else {
+                throw CarrierError.symlinkFailed("written links not found in readback: \(missing.keys.sorted().joined(separator: ", "))")
+            }
 
-        verifiedLinks = verified
-        verifyMessage = String(format: String(localized: "写入完成，%d 个 IMSI 链接已通过目录枚举验证。"), verified.count)
-        mode = .locked(links: links)
+            verifiedLinks = verified
+            verifyMessage = String(format: String(localized: "写入完成，%d 个 IMSI 链接已通过目录枚举验证。"), verified.count)
+            mode = .locked(links: links)
+        } catch {
+            let normalizedError = Self.normalizeTransportError(error)
+            verifiedLinks = [:]
+            verifyMessage = String(
+                format: String(localized: "写入已完成，但目录验证暂时失败，可能已锁定。请稍后点击“检查锁定状态”确认。技术详情：%@"),
+                normalizedError.localizedDescription
+            )
+            mode = .locked(links: links)
+            CarrierLockLog.shared.append("[锁定] 目录验证失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[锁定] 原始错误：\(error.localizedDescription)")
+            CarrierLockLog.shared.append("[锁定] 写入返回成功，等待用户稍后检查确认：\(modeSummary)")
+        }
     }
 
     /// Builds a symlink payload; the transport stages the real link so
@@ -344,7 +404,7 @@ final class CarrierService: ObservableObject {
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
         guard let error = error as? CarrierError else { return false }
         switch error {
-        case .pairingRequired, .transportFailed, .connectionFailed:
+        case .pairingRequired, .transportFailed, .connectionFailed, .directoryReadFailed:
             return true
         case .unsupported, .invalidIMSI, .invalidBundle, .symlinkFailed:
             return false

@@ -9,6 +9,7 @@ struct CarrierLockRootView: View {
     @State private var editingIMSI: String?
     @State private var showingStartupGate = true
     @State private var confirmingLock = false
+    @State private var warningPreflight = false
 
     var body: some View {
         NavigationStack {
@@ -64,7 +65,7 @@ struct CarrierLockRootView: View {
             CarrierLockAboutView()
         }
         .sheet(isPresented: $showingAirliftSetup, onDismiss: {
-            Task { await service.lock() }
+            Task { await startLockFlow() }
         }) {
             CarrierLockAirliftSetupView()
         }
@@ -125,6 +126,18 @@ struct CarrierLockRootView: View {
         } message: {
             Text("请先与电脑核对 IMSI 是否为本机 SIM 的 IMSI。如果误锁成卡贴伪装 IMSI，运营商配置会持续匹配到错误目标，可能导致信号不稳定、功能异常或反复触发激活。")
         }
+        .confirmationDialog(
+            "目录读取预检失败",
+            isPresented: $warningPreflight,
+            titleVisibility: .visible
+        ) {
+            Button("仍然写入链接", role: .destructive) {
+                confirmingLock = true
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(preflightWarningMessage)
+        }
     }
 
     private var header: some View {
@@ -150,23 +163,24 @@ struct CarrierLockRootView: View {
 
     private var statusCard: some View {
         HStack(spacing: 16) {
-            Image(systemName: modeSymbol)
+            Image(systemName: statusSymbol)
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(modeColor)
+                .foregroundStyle(statusColor)
                 .frame(width: 48, height: 48)
-                .background(modeColor.opacity(0.12), in: .circle)
+                .background(statusColor.opacity(0.12), in: .circle)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(modeTitle)
+                Text(statusTitle)
                     .font(.headline)
-                Text(modeDetail)
+                Text(statusDetail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
             }
 
             Spacer(minLength: 0)
 
-            if case .locking = service.mode {
+            if isBusy {
                 ProgressView()
             }
         }
@@ -212,7 +226,7 @@ struct CarrierLockRootView: View {
 
     private var lockButton: some View {
         Button {
-            Task { await service.lock() }
+            Task { await startLockFlow() }
         } label: {
             Label("锁定运营商配置", systemImage: "lock.fill")
                 .frame(maxWidth: .infinity)
@@ -269,11 +283,6 @@ struct CarrierLockRootView: View {
                 .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
             }
 
-            if let verifyMessage = service.verifyMessage {
-                Text(verifyMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -327,7 +336,25 @@ struct CarrierLockRootView: View {
 
     private var isBusy: Bool {
         if case .locking = service.mode { return true }
+        if service.busyMessage != nil { return true }
         return false
+    }
+
+    private var preflightWarningMessage: String {
+        let reason = service.preflightMessage ?? String(localized: "未知错误")
+        return String(
+            format: String(localized: "预检无法读取运营商目录：%@\n\n建议先打开 Apple Books 并稍等，或重启后再试。继续写入时，App 可能只能显示“写入完成但无法验证”。"),
+            reason
+        )
+    }
+
+    private func startLockFlow() async {
+        let passed = await service.preflightLockDirectory()
+        if passed {
+            confirmingLock = true
+        } else {
+            warningPreflight = true
+        }
     }
 
     private var modeTitle: String {
@@ -354,6 +381,25 @@ struct CarrierLockRootView: View {
         }
     }
 
+    private var statusDetail: String {
+        if let verifyMessage = service.verifyMessage {
+            return verifyMessage
+        }
+        return modeDetail
+    }
+
+    private var statusTitle: String {
+        guard let verifyMessage = service.verifyMessage else {
+            return modeTitle
+        }
+        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
+            return String(localized: "检查失败")
+        }
+        return service.verifiedLinks.isEmpty
+            ? String(localized: "未锁定")
+            : String(localized: "已锁定")
+    }
+
     private var modeSymbol: String {
         switch service.mode {
         case .idle: "lock.open"
@@ -363,6 +409,16 @@ struct CarrierLockRootView: View {
         }
     }
 
+    private var statusSymbol: String {
+        guard let verifyMessage = service.verifyMessage else {
+            return modeSymbol
+        }
+        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
+            return "exclamationmark.triangle.fill"
+        }
+        return service.verifiedLinks.isEmpty ? "lock.open" : "lock.fill"
+    }
+
     private var modeColor: Color {
         switch service.mode {
         case .idle: .secondary
@@ -370,6 +426,16 @@ struct CarrierLockRootView: View {
         case .locked: .teal
         case .failed: .red
         }
+    }
+
+    private var statusColor: Color {
+        guard let verifyMessage = service.verifyMessage else {
+            return modeColor
+        }
+        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
+            return .red
+        }
+        return service.verifiedLinks.isEmpty ? .secondary : .teal
     }
 
     private var imsiDetail: String {
