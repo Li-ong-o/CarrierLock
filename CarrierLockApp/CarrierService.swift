@@ -53,7 +53,6 @@ final class CarrierService: ObservableObject {
     @Published private(set) var verifiedLinks: [String: String] = [:]
     @Published private(set) var verifyMessage: String?
     @Published private(set) var isCheckingStatus = false
-    @Published private(set) var preflightMessage: String?
 
     static let shared = CarrierService()
     private init() {
@@ -188,36 +187,6 @@ final class CarrierService: ObservableObject {
             verifyMessage = String(format: String(localized: "检查失败：%@"), normalizedError.localizedDescription)
             CarrierLockLog.shared.append("[检查] 失败：\(normalizedError.localizedDescription)")
             CarrierLockLog.shared.append("[检查] 原始错误：\(error.localizedDescription)")
-        }
-    }
-
-    /// Check that AirTraffic can currently export and enumerate the carrier
-    /// directory before allowing a new overlay write.
-    func preflightLockDirectory() async -> Bool {
-        preflightMessage = nil
-        CarrierLockLog.shared.append("[预检] 开始检测运营商目录读取能力")
-
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
-            preflightMessage = String(localized: "缺少配对文件，无法完成写入前检测。")
-            CarrierLockLog.shared.append("[预检] 失败：缺少配对文件")
-            return false
-        }
-
-        busyMessage = String(localized: "正在检测运营商目录读取能力…")
-        defer { busyMessage = nil }
-
-        do {
-            let links = try await readLockLinks(pairingPath: pairingPath)
-            CarrierLockLog.shared.append("[预检] 成功：目录可读取，当前 IMSI 链接数 \(links.count)")
-            return true
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            preflightMessage = normalizedError.localizedDescription
-            CarrierLockLog.shared.append("[预检] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[预检] 原始错误：\(error.localizedDescription)")
-            return false
         }
     }
 

@@ -118,6 +118,16 @@ int32_t al_exploit_restore_dir(const char *pairing_path,
                                void *ctx,
                                char **out_json,
                                char **out_error);
+
+// Delete one root-level 15-digit IMSI symlink from an absolute iOS directory.
+// `out_json` must be released with al_string_free(out_json).
+int32_t al_exploit_delete_imsi_link(const char *pairing_path,
+                                    const char *ios_path,
+                                    const char *link_name,
+                                    ALLogCallback log_cb,
+                                    void *ctx,
+                                    char **out_json,
+                                    char **out_error);
 void al_bytes_free(uint8_t *ptr, size_t len);
 
 // Write all files from `source_dir` into `target_dir` on the device.

@@ -68,6 +68,17 @@ actor CarrierTransport {
 
     func readDir(path: String, pairingPath: String) async throws -> String? {
         try Self.ensureCooldownPassed()
+        do {
+            return try await readDirOnce(path: path, pairingPath: pairingPath)
+        } catch {
+            CarrierLockLog.shared.append("[目录读取] 首次失败，5 秒后自动清理 AirTraffic/Books 残留并重试")
+            try await Task.sleep(for: .seconds(Self.failureCooldown))
+            CarrierLockLog.shared.append("[目录读取] 开始自动重试目录事务")
+            return try await readDirOnce(path: path, pairingPath: pairingPath)
+        }
+    }
+
+    private func readDirOnce(path: String, pairingPath: String) async throws -> String? {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {

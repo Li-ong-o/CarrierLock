@@ -9,7 +9,6 @@ struct CarrierLockRootView: View {
     @State private var editingIMSI: String?
     @State private var showingStartupGate = true
     @State private var confirmingLock = false
-    @State private var warningPreflight = false
 
     var body: some View {
         NavigationStack {
@@ -125,18 +124,6 @@ struct CarrierLockRootView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("请先与电脑核对 IMSI 是否为本机 SIM 的 IMSI。如果误锁成卡贴伪装 IMSI，运营商配置会持续匹配到错误目标，可能导致信号不稳定、功能异常或反复触发激活。")
-        }
-        .confirmationDialog(
-            "目录读取预检失败",
-            isPresented: $warningPreflight,
-            titleVisibility: .visible
-        ) {
-            Button("仍然写入链接", role: .destructive) {
-                confirmingLock = true
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(preflightWarningMessage)
         }
     }
 
@@ -340,21 +327,8 @@ struct CarrierLockRootView: View {
         return false
     }
 
-    private var preflightWarningMessage: String {
-        let reason = service.preflightMessage ?? String(localized: "未知错误")
-        return String(
-            format: String(localized: "预检无法读取运营商目录：%@\n\n建议先打开 Apple Books 并稍等，或重启后再试。继续写入时，App 可能只能显示“写入完成但无法验证”。"),
-            reason
-        )
-    }
-
     private func startLockFlow() async {
-        let passed = await service.preflightLockDirectory()
-        if passed {
-            confirmingLock = true
-        } else {
-            warningPreflight = true
-        }
+        confirmingLock = true
     }
 
     private var modeTitle: String {
