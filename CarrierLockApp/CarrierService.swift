@@ -319,11 +319,23 @@ final class CarrierService: ObservableObject {
             throw CarrierError.invalidBundle(invalidBundles.first ?? "(empty)")
         }
 
-        busyMessage = String(localized: "Preparing carrier bundle link…")
+        busyMessage = String(localized: "正在准备干净基线…")
         mode = .locking
         defer { busyMessage = nil }
 
-        for (index, link) in links.sorted(by: { $0.key < $1.key }).enumerated() {
+
+        do {
+            let baseline = try await readLockLinks(pairingPath: pairingPath)
+            CarrierLockLog.shared.append("[基线] 目录读取成功，检测到 \(baseline.count) 个已有 IMSI 链接")
+        } catch {
+            let normalizedError = Self.normalizeTransportError(error)
+            CarrierLockLog.shared.append("[基线] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[基线] 原始错误：\(error.localizedDescription)")
+            throw normalizedError
+        }
+
+        let orderedLinks = links.sorted(by: { $0.key < $1.key })
+        for (index, link) in orderedLinks.enumerated() {
             let payload = try buildSymlinkPayload(
                 name: link.key,
                 target: "/System/Library/Carrier Bundles/iPhone/\(link.value).bundle"
@@ -331,15 +343,27 @@ final class CarrierService: ObservableObject {
             busyMessage = String(
                 format: String(localized: "正在写入 IMSI 链接 %d/%d：%@ -> %@…"),
                 index + 1,
-                links.count,
+                orderedLinks.count,
                 link.key,
                 link.value
             )
             // AirliftProbe's verified path stages exactly one IMSI symlink per
             // AirTraffic transaction. Keep that shape even for multi-SIM locks.
             try await CarrierTransport.shared.write(files: [payload], pairingPath: pairingPath)
+            if index + 1 < orderedLinks.count {
+                busyMessage = String(
+                    format: String(localized: "IMSI 链接 %d/%d 已写入，等待 AirTraffic 状态稳定…"),
+                    index + 1,
+                    orderedLinks.count
+                )
+                try await Task.sleep(for: .seconds(5))
+            }
         }
 
+        busyMessage = String(localized: "写入完成，等待目录状态稳定…")
+        try await Task.sleep(for: .seconds(5))
+
+        busyMessage = String(localized: "正在验证 IMSI 链接…")
         do {
             let verified = try await readLockLinks(pairingPath: pairingPath)
             let missing = links.filter { verified[$0.key] != $0.value }
