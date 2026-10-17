@@ -1,0 +1,96 @@
+name: Release unsigned IPA
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unsigned-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    runs-on: xcode-27
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "27.0"
+
+      - name: Build patched AirliftFFI
+        run: bash scripts/build-airlift-xcframework.sh
+
+      - name: Verify vendored Airlift
+        run: bash scripts/verify-airlift.sh
+
+      - name: Read app version
+        run: |
+          VERSION=$(awk '
+            /<key>MARKETING_VERSION<\/key>/ {
+              getline
+              gsub(/.*<string>/, "")
+              gsub(/<\/string>.*/, "")
+              print
+              exit
+            }
+          ' CarrierLock.xcodeproj/project.pbxproj)
+          test -n "$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match app version v$VERSION" >&2
+            exit 1
+          fi
+
+      - name: Build unsigned archive
+        run: |
+          xcodebuild archive \
+            -project CarrierLock.xcodeproj \
+            -scheme CarrierLock \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/CarrierLock.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify archived Airlift integration
+        run: bash scripts/verify-airlift.sh "$RUNNER_TEMP/CarrierLock.xcarchive/Products/Applications/CarrierLock.app" "$VERSION"
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R \
+            "$RUNNER_TEMP/CarrierLock.xcarchive/Products/Applications/CarrierLock.app" \
+            "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qry "CarrierLock_unsigned.ipa" Payload
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarrierLock_unsigned
+          path: ${{ runner.temp }}/CarrierLock_unsigned.ipa
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: CarrierLock v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: ${{ runner.temp }}/CarrierLock_unsigned.ipa
