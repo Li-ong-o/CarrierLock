@@ -46,7 +46,14 @@ do
     echo "Airlift library not found: $library" >&2
     exit 1
   fi
-  for symbol in al_exploit_write_dir al_string_free al_syslog_stream_start al_device_respring; do
+  for symbol in \
+    al_exploit_write_dir \
+    al_exploit_read_dir \
+    al_exploit_restore_dir \
+    al_string_free \
+    al_syslog_stream_start \
+    al_device_respring
+  do
     if grep -aq "_${symbol}" "$library"; then
       continue
     fi
@@ -73,7 +80,14 @@ app_path="$1"
 expected_version="$2"
 # Rust resolves this symbol with dlsym, so a successful link alone is insufficient.
 exports=$(xcrun dyld_info -exports "$app_path/CarrierLock")
-for symbol in _ALGetGrappaToken _al_exploit_write_dir _al_syslog_stream_start _al_device_respring; do
+for symbol in \
+  _ALGetGrappaToken \
+  _al_exploit_write_dir \
+  _al_exploit_read_dir \
+  _al_exploit_restore_dir \
+  _al_syslog_stream_start \
+  _al_device_respring
+do
   if ! grep -q "${symbol}$" <<< "$exports"; then
     echo "Archive is missing exported symbol $symbol" >&2
     exit 1
