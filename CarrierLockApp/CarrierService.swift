@@ -9,6 +9,7 @@ enum CarrierError: LocalizedError {
     case invalidBundle(String)
     case symlinkFailed(String)
     case transportFailed(String)
+    case connectionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +25,8 @@ enum CarrierError: LocalizedError {
             String(format: String(localized: "Could not build carrier bundle link: %@"), reason)
         case .transportFailed(let reason):
             String(format: String(localized: "AirLift write failed: %@"), reason)
+        case .connectionFailed(let reason):
+            String(format: String(localized: "Cannot reach the AirLift tunnel. Make sure Wi-Fi is connected and LocalDevVPN is active, then retry.\n\nTechnical details: %@"), reason)
         }
     }
 }
@@ -91,9 +94,11 @@ final class CarrierService: ObservableObject {
             try await run()
             CarrierLockLog.shared.append("[锁定] 成功：\(modeSummary)")
         } catch {
-            CarrierLockLog.shared.append("[锁定] 失败：\(error.localizedDescription)")
-            mode = .failed(error.localizedDescription)
-            needsAirliftSetup = shouldOfferAirliftSetup(for: error)
+            let normalizedError = Self.normalizeTransportError(error)
+            CarrierLockLog.shared.append("[锁定] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[锁定] 原始错误：\(error.localizedDescription)")
+            mode = .failed(normalizedError.localizedDescription)
+            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
         }
     }
 
@@ -128,9 +133,11 @@ final class CarrierService: ObservableObject {
             CarrierLockLog.shared.append("[恢复] 成功：\(verifyMessage ?? "")")
             mode = .idle
         } catch {
-            CarrierLockLog.shared.append("[恢复] 失败：\(error.localizedDescription)")
-            mode = .failed(error.localizedDescription)
-            needsAirliftSetup = shouldOfferAirliftSetup(for: error)
+            let normalizedError = Self.normalizeTransportError(error)
+            CarrierLockLog.shared.append("[恢复] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[恢复] 原始错误：\(error.localizedDescription)")
+            mode = .failed(normalizedError.localizedDescription)
+            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
         }
     }
 
@@ -169,8 +176,10 @@ final class CarrierService: ObservableObject {
                 CarrierLockLog.shared.append("[检查] \(imsi) -> \(links[imsi] ?? "未知目标")")
             }
         } catch {
-            verifyMessage = String(format: String(localized: "检查失败：%@"), error.localizedDescription)
-            CarrierLockLog.shared.append("[检查] 失败：\(error.localizedDescription)")
+            let normalizedError = Self.normalizeTransportError(error)
+            verifyMessage = String(format: String(localized: "检查失败：%@"), normalizedError.localizedDescription)
+            CarrierLockLog.shared.append("[检查] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[检查] 原始错误：\(error.localizedDescription)")
         }
     }
 
@@ -190,6 +199,20 @@ final class CarrierService: ObservableObject {
             throw CarrierError.transportFailed("AirLift read dir returned no JSON.")
         }
         return try Self.parseIMSILinks(from: json)
+    }
+
+    nonisolated static func normalizeTransportError(_ error: Error) -> CarrierError {
+        guard let carrierError = error as? CarrierError else {
+            return .transportFailed(error.localizedDescription)
+        }
+
+        if case .transportFailed(let reason) = carrierError,
+           reason.localizedCaseInsensitiveContains("RemoteXPC timed out")
+            || reason.localizedCaseInsensitiveContains("loopback VPN") {
+            return .connectionFailed(reason)
+        }
+
+        return carrierError
     }
 
     /// Parses the JSON tree from al_exploit_read_dir and returns IMSI symlinks
@@ -321,7 +344,7 @@ final class CarrierService: ObservableObject {
     private func shouldOfferAirliftSetup(for error: Error) -> Bool {
         guard let error = error as? CarrierError else { return false }
         switch error {
-        case .pairingRequired, .transportFailed:
+        case .pairingRequired, .transportFailed, .connectionFailed:
             return true
         case .unsupported, .invalidIMSI, .invalidBundle, .symlinkFailed:
             return false
