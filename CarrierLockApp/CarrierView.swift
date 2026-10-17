@@ -220,7 +220,7 @@ struct CarrierLockRootView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(isBusy)
+        .disabled(isBusy || !hasLockableIMSI)
     }
     private var restoreButton: some View {
         Button(role: .destructive) {
@@ -327,7 +327,15 @@ struct CarrierLockRootView: View {
         return false
     }
 
+    private var hasLockableIMSI: Bool {
+        guard !service.selectedIMSIs.isEmpty else { return false }
+        return service.selectedIMSIs.allSatisfy {
+            $0.count == 15 && $0.allSatisfy(\.isNumber)
+        }
+    }
+
     private func startLockFlow() async {
+        guard hasLockableIMSI else { return }
         confirmingLock = true
     }
 
