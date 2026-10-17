@@ -7,6 +7,13 @@ import Foundation
 actor CarrierTransport {
     static let shared = CarrierTransport()
 
+    /// AirTraffic can temporarily stop producing AssetManifest after a failed
+    /// transaction. A short global cooldown prevents immediate retries from
+    /// compounding that state.
+    private static let failureCooldown: TimeInterval = 5
+    private static let cooldownLock = NSLock()
+    private static var cooldownUntil: Date?
+
     /// Carrier bundle directory CommCenter scans before falling back to the
     /// read-only system store.
     static let targetDirectory = "/var/mobile/Library/Carrier Bundles/iPhone"
@@ -28,12 +35,15 @@ actor CarrierTransport {
     }
 
     func readFile(path: String, pairingPath: String) async throws -> Data? {
-        try await withCheckedThrowingContinuation { continuation in
+        try Self.ensureCooldownPassed()
+        return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let result = try Self.readFileSync(path: path, pairingPath: pairingPath)
+                    Self.clearCooldown()
                     continuation.resume(returning: result)
                 } catch {
+                    Self.recordAirTrafficFailure(error)
                     continuation.resume(throwing: error)
                 }
             }
@@ -41,12 +51,15 @@ actor CarrierTransport {
     }
 
     func write(files: [Payload], pairingPath: String) async throws {
+        try Self.ensureCooldownPassed()
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     try Self.writeSync(files: files, pairingPath: pairingPath)
+                    Self.clearCooldown()
                     continuation.resume(returning: ())
                 } catch {
+                    Self.recordAirTrafficFailure(error)
                     continuation.resume(throwing: error)
                 }
             }
@@ -54,12 +67,15 @@ actor CarrierTransport {
     }
 
     func readDir(path: String, pairingPath: String) async throws -> String? {
-        try await withCheckedThrowingContinuation { continuation in
+        try Self.ensureCooldownPassed()
+        return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let result = try Self.readDirSync(path: path, pairingPath: pairingPath)
+                    Self.clearCooldown()
                     continuation.resume(returning: result)
                 } catch {
+                    Self.recordAirTrafficFailure(error)
                     continuation.resume(throwing: error)
                 }
             }
@@ -67,16 +83,53 @@ actor CarrierTransport {
     }
 
     func restoreDefault(pairingPath: String) async throws -> String? {
-        try await withCheckedThrowingContinuation { continuation in
+        try Self.ensureCooldownPassed()
+        return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let result = try Self.restoreDefaultSync(pairingPath: pairingPath)
+                    Self.clearCooldown()
                     continuation.resume(returning: result)
                 } catch {
+                    Self.recordAirTrafficFailure(error)
                     continuation.resume(throwing: error)
                 }
             }
         }
+    }
+
+    func cooldownSecondsRemaining() async -> Int {
+        Self.cooldownSecondsRemainingSync()
+    }
+
+    private static func ensureCooldownPassed() throws {
+        let seconds = cooldownSecondsRemainingSync()
+        guard seconds > 0 else { return }
+        CarrierLockLog.shared.append("[AirTraffic] 全局操作锁冷却中：还需 \(seconds) 秒")
+        throw CarrierError.transportFailed(
+            String(format: String(localized: "AirTraffic 刚刚操作失败，请等待 %d 秒后再试。"), seconds)
+        )
+    }
+
+    private static func recordAirTrafficFailure(_ error: Error) {
+        cooldownLock.lock()
+        cooldownUntil = Date().addingTimeInterval(failureCooldown)
+        cooldownLock.unlock()
+        CarrierLockLog.shared.append("[AirTraffic] 操作失败，启用 \(Int(failureCooldown)) 秒全局冷却")
+        CarrierLockLog.shared.append("[AirTraffic] 失败原因：\(error.localizedDescription)")
+    }
+
+    private static func clearCooldown() {
+        cooldownLock.lock()
+        cooldownUntil = nil
+        cooldownLock.unlock()
+    }
+
+    private static func cooldownSecondsRemainingSync() -> Int {
+        cooldownLock.lock()
+        let remaining = cooldownUntil?.timeIntervalSinceNow ?? 0
+        cooldownLock.unlock()
+        return max(0, Int(remaining.rounded(.up)))
     }
 
     private static func writeSync(files: [Payload], pairingPath: String) throws {
