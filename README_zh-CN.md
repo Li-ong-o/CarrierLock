@@ -43,6 +43,7 @@ CarrierLock 会监听 CommCenter 的 bundle 选择事件，帮助确认当前使
 
 ## 致谢 / Credits
 
+- 感谢 [CarrierSIM](https://github.com/ios-bundles/CarrierSIM) 提供的 IPCC Overlay 固定链接原理与实现参考。
 - 感谢 [AirliftSilence](https://github.com/YiHoooong/AirliftSilence) 提供的静音音频资源与替换方案研究。
 - 感谢 [airlift](https://github.com/0xjohnnydev/airlift)（作者 0xjohnny）提供的 AirTraffic 与 Airlock 研究，其作为项目依赖被保留。
 - 感谢 [Placard](https://github.com/frs0n/placard) 的贡献者提供的原始 iOS 项目结构与容器访问实现。

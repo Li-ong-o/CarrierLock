@@ -43,6 +43,7 @@ For an unsigned IPA, run the `Release unsigned IPA` workflow in GitHub Actions. 
 
 ## Credits
 
+- [CarrierSIM](https://github.com/ios-bundles/CarrierSIM) for the carrier-bundle Overlay symlink principle and implementation reference.
 - [AirliftSilence](https://github.com/YiHoooong/AirliftSilence) for the silent tone assets and replacement research.
 - [airlift](https://github.com/0xjohnnydev/airlift) by 0xjohnny for the AirTraffic and Airlock research retained in the project dependencies.
 - [Placard](https://github.com/frs0n/placard) contributors for the original iOS project structure and container-access implementation.
