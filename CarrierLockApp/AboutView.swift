@@ -1,7 +1,8 @@
 import SwiftUI
-
 struct CarrierLockAboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var service = CarrierService.shared
+    @State private var showsResetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -33,7 +34,7 @@ struct CarrierLockAboutView: View {
                     }
                 }
 
-                Section("跳激活的原理") {
+                Section("跳激活的原因") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("卡贴会修改或伪装 SIM 上报给系统的网络标识。CommCenter 在重启、基带复位或 SIM 重新注册后，需要根据 IMSI/ICCID 重新选择运营商配置；当匹配结果不稳定或需要重新走激活流程时，系统会弹出“需要激活”。")
                         Text("夜间待机、长时间充电、Wi-Fi 环境下更容易发生，是因为系统会进行维护任务、网络切换或基带复位，从而触发重新匹配。")
@@ -72,6 +73,8 @@ struct CarrierLockAboutView: View {
                     }
                 }
 
+                resetCarrierCard
+
                 Section("运行日志") {
                     Label("日志包含配对、回环连接和 AirLift 文件操作。", systemImage: "list.bullet.rectangle")
                         .font(.footnote)
@@ -84,9 +87,32 @@ struct CarrierLockAboutView: View {
                     }
                     .font(.footnote)
                 }
+
+                Section("开源地址") {
+                    Link(destination: URL(string: "https://github.com/Li-ong-o/CarrierLock")!) {
+                        Label {
+                            Text("查看源码")
+                        } icon: {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .foregroundStyle(.teal)
+                        }
+                    }
+                }
             }
             .navigationTitle("软件介绍")
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(
+                "确认重置运营商配置？",
+                isPresented: $showsResetConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("删除整个用户态 Carrier 目录", role: .destructive) {
+                    Task { await service.resetCarrierConfiguration() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("此操作只清空 /var/mobile/Library/Carrier Bundles/iPhone，不会修改 /System/Library/Carrier Bundles。")
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
@@ -95,6 +121,49 @@ struct CarrierLockAboutView: View {
                 }
             }
         }
+    }
+
+    private var resetCarrierCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Label("重置运营商配置", systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.red)
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("清空用户态 Carrier Overlay，恢复系统默认配置")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("将删除用户态 Carrier Overlay 目录中的全部项目，让 CommCenter 回退到系统自带运营商配置。不会修改系统只读分区，也不会删除系统运营商 Bundle。删除后可重新初始化，或插入 SIM 让系统重新生成 Overlay 目录。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGroupedBackground), in: .rect(cornerRadius: 12))
+
+            Button(role: .destructive) {
+                showsResetConfirmation = true
+            } label: {
+                Label("重置运营商配置", systemImage: "trash.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(service.mode == .locking || service.isCheckingStatus)
+
+            if let message = service.verifyMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
     }
 
     private var versionText: String {

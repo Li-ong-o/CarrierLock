@@ -37,12 +37,17 @@ The software is provided "as is", without any express or implied warranty. The d
 
 ## Build
 
-Open `carrierlock.xcodeproj`, select the `carrierlock` target, set your signing team, and build to a physical device.
+Open `CarrierLock.xcodeproj`, select the `CarrierLock` target, set your signing team, and build to a physical device.
+
+The Rust source for the vendored Airlift FFI is in [`rust-core/`](./rust-core/README.md).
+After changing it, run `scripts/build-airlift-xcframework.sh` and commit the updated
+`Vendor/CarrierLock/AirliftFFI.xcframework` together with the source change.
 
 For an unsigned IPA, run the `Release unsigned IPA` workflow in GitHub Actions. The artifact is named `carrierlock-v<version>-unsigned.ipa`.
 
 ## Credits
 
+- [AirCard-iOS](https://github.com/mak5er/AirCard-iOS) for the Rust Airlift FFI included under `rust-core/`.
 - [CarrierSIM](https://github.com/ios-bundles/CarrierSIM) for the carrier-bundle Overlay symlink principle and implementation reference.
 - [AirliftSilence](https://github.com/YiHoooong/AirliftSilence) for the silent tone assets and replacement research.
 - [airlift](https://github.com/0xjohnnydev/airlift) by 0xjohnny for the AirTraffic and Airlock research retained in the project dependencies.

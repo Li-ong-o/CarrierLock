@@ -126,6 +126,22 @@ actor CarrierTransport {
         }
     }
 
+    func deleteCarrierDirectory(pairingPath: String) async throws -> String? {
+        try Self.ensureCooldownPassed()
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let result = try Self.deleteCarrierDirectorySync(pairingPath: pairingPath)
+                    Self.clearCooldown()
+                    continuation.resume(returning: result)
+                } catch {
+                    Self.recordAirTrafficFailure(error)
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     func cooldownSecondsRemaining() async -> Int {
         Self.cooldownSecondsRemainingSync()
     }
@@ -223,6 +239,31 @@ actor CarrierTransport {
 
         guard result == 0 else {
             throw CarrierError.transportFailed(message ?? "AirLift restore failed (\(result)).")
+        }
+        guard let outJson else { return nil }
+        let json = String(cString: outJson)
+        al_string_free(outJson)
+        return json
+    }
+
+    private static func deleteCarrierDirectorySync(pairingPath: String) throws -> String? {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outError: UnsafeMutablePointer<CChar>?
+        let result = pairingPath.withCString { pairingCString in
+            al_exploit_delete_carrier_dir(
+                pairingCString,
+                CarrierLockLog.ffiCallback,
+                nil,
+                &outJson,
+                &outError
+            )
+        }
+
+        let message = outError.map { String(cString: $0) }
+        if let outError { al_string_free(outError) }
+
+        guard result == 0 else {
+            throw CarrierError.transportFailed(message ?? "AirLift carrier reset failed (\(result)).")
         }
         guard let outJson else { return nil }
         let json = String(cString: outJson)

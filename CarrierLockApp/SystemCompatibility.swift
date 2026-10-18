@@ -18,4 +18,10 @@ enum SystemCompatibility {
     static var supportedRangeDescription: String {
         String(localized: "iOS 18.0 - 27.2 beta 2 (24B5089g)")
     }
+
+    /// Settings › Developer Mode pairing is only offered on iOS 27 and later.
+    /// Earlier systems must import a computer-generated pairing file.
+    static var supportsOnDevicePairing: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    }
 }

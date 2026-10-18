@@ -146,6 +146,42 @@ final class CarrierService: ObservableObject {
         }
     }
 
+    func resetCarrierConfiguration() async {
+        guard mode != .locking, !isCheckingStatus else { return }
+        CarrierLockLog.shared.append("[重置] 开始清空用户态运营商配置目录")
+
+        do {
+            let pairingPath = PairingController.pairingFilePath()
+            let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
+            guard size > 0 else { throw CarrierError.pairingRequired }
+
+            busyMessage = String(localized: "正在重置运营商配置…")
+            mode = .locking
+            defer { busyMessage = nil }
+
+            guard let json = try await CarrierTransport.shared.deleteCarrierDirectory(pairingPath: pairingPath),
+                  let data = json.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(RestoreResult.self, from: data),
+                  result.ok else {
+                throw CarrierError.transportFailed("AirLift carrier reset returned no result.")
+            }
+
+            verifiedLinks = [:]
+            verifyMessage = result.changed
+                ? String(format: String(localized: "已清空用户态运营商配置目录，共移除 %d 个项目。"), result.removed)
+                : String(localized: "用户态运营商配置目录已经是空的。")
+            CarrierLockLog.shared.append("[重置] 成功：\(verifyMessage ?? "")")
+            CarrierLockLog.shared.append("[重置] FFI 结果：before=\(result.before), removed=\(result.removed), after=\(result.after)")
+            mode = .idle
+        } catch {
+            let normalizedError = Self.normalizeTransportError(error)
+            CarrierLockLog.shared.append("[重置] 失败：\(normalizedError.localizedDescription)")
+            CarrierLockLog.shared.append("[重置] 原始错误：\(error.localizedDescription)")
+            mode = .failed(normalizedError.localizedDescription)
+            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
+        }
+    }
+
     func lockWithFallback() async {
         guard mode != .locking else { return }
         mode = .failed(

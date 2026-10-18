@@ -50,6 +50,7 @@ do
     al_exploit_write_dir \
     al_exploit_read_dir \
     al_exploit_restore_dir \
+    al_exploit_delete_carrier_dir \
     al_string_free \
     al_syslog_stream_start \
     al_device_respring
@@ -85,6 +86,7 @@ for symbol in \
   _al_exploit_write_dir \
   _al_exploit_read_dir \
   _al_exploit_restore_dir \
+  _al_exploit_delete_carrier_dir \
   _al_syslog_stream_start \
   _al_device_respring
 do

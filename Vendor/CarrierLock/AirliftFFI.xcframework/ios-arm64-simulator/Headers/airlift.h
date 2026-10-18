@@ -128,6 +128,15 @@ int32_t al_exploit_restore_dir(const char *pairing_path,
                                char **out_json,
                                char **out_error);
 
+// Delete the complete user-space Carrier Bundles/iPhone overlay directory.
+// The iOS target is fixed inside this FFI; no arbitrary path is accepted.
+// `out_json` must be released with al_string_free(out_json).
+int32_t al_exploit_delete_carrier_dir(const char *pairing_path,
+                                      ALLogCallback log_cb,
+                                      void *ctx,
+                                      char **out_json,
+                                      char **out_error);
+
 // Delete one root-level 15-digit IMSI symlink from an absolute iOS directory.
 // `out_json` must be released with al_string_free(out_json).
 int32_t al_exploit_delete_imsi_link(const char *pairing_path,

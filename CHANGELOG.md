@@ -6,9 +6,25 @@ All notable changes to **CarrierLock** are documented in this file.
 
 ### Added
 
+- Complete Rust source for the vendored Airlift FFI static library, plus an
+  in-repository build script.
 - Multi-IMSI carrier overlay locking. One operation can write overlay links for
   a real SIM IMSI, adapter-reported IMSIs, both dual-SIM lines, and additional
   candidates.
+
+## [1.0.5] - 2026-10-18
+
+### Added
+
+- AirBeep-style on-device pairing flow and live network status UI.
+- Carrier Overlay reset action in the About page.
+- Open-source repository link in the About page.
+
+### Changed
+
+- About page wording now explains reasons for activation prompts.
+- Airlift FFI is now built from source stored inside this repository.
+- Version is now 1.0.5 (build 11).
 
 ## [1.0.1] - 2026-10-15
 

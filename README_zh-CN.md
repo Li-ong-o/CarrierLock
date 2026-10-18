@@ -37,12 +37,17 @@ CarrierLock 会监听 CommCenter 的 bundle 选择事件，帮助确认当前使
 
 ## 构建
 
-打开 `carrierlock.xcodeproj`，选择 `carrierlock` target，设置你的签名团队，然后构建到实体设备。
+打开 `CarrierLock.xcodeproj`，选择 `CarrierLock` target，设置你的签名团队，然后构建到实体设备。
+
+Airlift FFI 的 Rust 完整源码位于 [`rust-core/`](./rust-core/README.md)。
+修改源码后运行 `scripts/build-airlift-xcframework.sh`，并把更新后的
+`Vendor/CarrierLock/AirliftFFI.xcframework` 与源码一起提交。
 
 如需构建 unsigned IPA，请在 GitHub Actions 中运行 `Release unsigned IPA` 工作流。成品文件名为 `carrierlock-v<version>-unsigned.ipa`。
 
 ## 致谢 / Credits
 
+- 感谢 [AirCard-iOS](https://github.com/mak5er/AirCard-iOS) 提供 `rust-core/` 中的 Rust Airlift FFI。
 - 感谢 [CarrierSIM](https://github.com/ios-bundles/CarrierSIM) 提供的 IPCC Overlay 固定链接原理与实现参考。
 - 感谢 [AirliftSilence](https://github.com/YiHoooong/AirliftSilence) 提供的静音音频资源与替换方案研究。
 - 感谢 [airlift](https://github.com/0xjohnnydev/airlift)（作者 0xjohnny）提供的 AirTraffic 与 Airlock 研究，其作为项目依赖被保留。

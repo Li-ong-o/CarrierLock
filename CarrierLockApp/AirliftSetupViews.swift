@@ -1,8 +1,10 @@
+import Combine
+import Network
 import SwiftUI
 import UIKit
-import Network
-import Combine
 
+/// Uses the interface table for the Wi-Fi decision. Once LocalDevVPN is active,
+/// a Wi-Fi-specific path monitor can report unsatisfied even though en0 is up.
 @MainActor
 final class AirliftWiFiMonitor: ObservableObject {
     enum Status {
@@ -13,13 +15,16 @@ final class AirliftWiFiMonitor: ObservableObject {
 
     @Published private(set) var status: Status = .checking
 
-    private let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
-    private let queue = DispatchQueue(label: "me.ssus.carrierlock.airlift.wifi-monitor")
+    private let queue = DispatchQueue(label: "com.carrier.lock.airlift.wifi-monitor")
+    private let monitor = NWPathMonitor()
 
     init() {
-        monitor.pathUpdateHandler = { [weak self] path in
+        refresh()
+        monitor.pathUpdateHandler = { [weak self] _ in
             DispatchQueue.main.async {
-                self?.status = path.status == .satisfied ? .connected : .disconnected
+                MainActor.assumeIsolated {
+                    self?.refresh()
+                }
             }
         }
         monitor.start(queue: queue)
@@ -28,31 +33,20 @@ final class AirliftWiFiMonitor: ObservableObject {
     deinit {
         monitor.cancel()
     }
+
+    private func refresh() {
+        status = NetworkStatus.wifiActive ? .connected : .disconnected
+    }
 }
 
-enum SetupStepStatus {
-    case pending
-    case active
-    case passed
-    case failed
+struct SetupStepStatus {
+    let icon: String
+    let tint: Color
 
-    var icon: String {
-        switch self {
-        case .pending: "circle.dotted"
-        case .active: "arrow.right.circle.fill"
-        case .passed: "checkmark.circle.fill"
-        case .failed: "xmark.circle.fill"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .pending: .secondary
-        case .active: .blue
-        case .passed: .green
-        case .failed: .red
-        }
-    }
+    static let pending = SetupStepStatus(icon: "circle.dotted", tint: .secondary)
+    static let active = SetupStepStatus(icon: "arrow.right.circle.fill", tint: .blue)
+    static let passed = SetupStepStatus(icon: "checkmark.circle.fill", tint: .green)
+    static let failed = SetupStepStatus(icon: "xmark.circle.fill", tint: .red)
 }
 
 struct SetupChecklistRow: View {
@@ -62,15 +56,10 @@ struct SetupChecklistRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            if status == .active {
-                ProgressView()
-                    .frame(width: 24, height: 24)
-            } else {
-                Image(systemName: status.icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(status.tint)
-                    .frame(width: 24, height: 24)
-            }
+            Image(systemName: status.icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(status.tint)
+                .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
@@ -113,143 +102,246 @@ struct SetupActionLabel: View {
     }
 }
 
-struct PairingGuideCard: View {
+struct AirliftWiFiCheckingView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ProgressView()
+                .controlSize(.large)
+            Text("正在检查 Wi-Fi…")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(24)
+    }
+}
+
+struct AirliftWiFiRequiredView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Spacer()
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+            Text("需要 Wi-Fi")
+                .font(.largeTitle.bold())
+            Text("Airlift 需要已连接的 Wi-Fi 网络，LocalDevVPN 不能在蜂窝网络下使用。")
+                .foregroundStyle(.secondary)
+            Text("请先连接 Wi-Fi。连接后 CarrierLock 会自动继续。")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(24)
+    }
+}
+
+struct AirliftPairingView: View {
     let running: Bool
     let pin: String?
     let error: String?
     let onStart: () -> Void
     let onImportPairingFile: () -> Void
+    var onDevicePairingSupported: Bool = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("配对 CarrierLock", systemImage: "iphone.gen3.radiowaves.left.and.right")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 20) {
+            Spacer()
+            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+            Text("配对这台 iPhone")
+                .font(.largeTitle.bold())
 
-            VStack(alignment: .leading, spacing: 10) {
-                guideStep(number: 1, text: "点“开始配对”，然后保持这个页面打开。")
-                guideStep(number: 2, text: "前往 设置 › 隐私与安全性 › 开发者模式。")
-                guideStep(number: 3, text: "点“与 CarrierLock 配对”，输入这里显示的 PIN。")
-                guideStep(number: 4, text: "确认配对后返回 CarrierLock。")
-            }
-
-            if let pin {
-                VStack(spacing: 6) {
-                    Text("配对 PIN")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            if onDevicePairingSupported {
+                Text("开始配对后，前往 设置 › 隐私与安全性 › 开发者模式 › 与 CarrierLock 配对。")
+                    .foregroundStyle(.secondary)
+                if let pin {
                     Text(pin)
-                        .font(.title.monospacedDigit().bold())
+                        .font(.system(size: 46, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 12)
+                        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10))
+                        .accessibilityLabel("配对 PIN")
                 }
-                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8))
+            } else {
+                Text("此系统版本无法在手机上直接配对。请在电脑上用 iloader 或 idevice_pair 生成配对文件，然后导入这里。")
+                    .foregroundStyle(.secondary)
+                PairingToolLinks()
             }
 
             if let error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
+                Text(error)
                     .foregroundStyle(.red)
             }
 
-            Button(action: onStart) {
-                SetupActionLabel(
-                    running ? "等待确认" : "开始配对",
-                    systemImage: "dot.radiowaves.left.and.right",
-                    busyTitle: "等待确认",
-                    isBusy: running
-                )
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(running)
+            Spacer()
 
-            Button(action: onImportPairingFile) {
-                SetupActionLabel("导入已有配对文件", systemImage: "square.and.arrow.down")
+            if onDevicePairingSupported {
+                Button(action: onStart) {
+                    if running {
+                        ProgressView("等待配对确认…")
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("开始配对")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(running)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .disabled(running)
+
+            if onDevicePairingSupported {
+                importPairingButton
+                    .buttonStyle(.bordered)
+            } else {
+                importPairingButton
+                    .buttonStyle(.borderedProminent)
+            }
         }
+        .padding(24)
     }
 
-    private func guideStep(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(number)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(.tint))
+    private var importPairingButton: some View {
+        Button(action: onImportPairingFile) {
+            Label("导入配对文件", systemImage: "square.and.arrow.down")
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .disabled(running)
+    }
+}
 
-            Text(text)
-                .font(.subheadline)
+struct PairingToolLinks: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("在电脑上生成配对文件后导入：")
+                .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            toolLink(
+                name: "iloader",
+                detail: "支持导出配对文件",
+                url: "https://github.com/nab138/iloader"
+            )
+            toolLink(
+                name: "idevice_pair",
+                detail: "生成并保存配对记录",
+                url: "https://github.com/jkcoxson/idevice_pair"
+            )
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
+    }
+
+    private func toolLink(name: String, detail: String, url: String) -> some View {
+        Link(destination: URL(string: url)!) {
+            HStack(spacing: 10) {
+                Image(systemName: "desktopcomputer")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: name)
+                        .font(.body.weight(.medium))
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
 
-struct LocalDevVPNGuideCard: View {
+struct AirliftVPNView: View {
     let connectionError: String?
     let checking: Bool
     let onCheck: () -> Void
     let onPairAgain: () -> Void
 
+    @State private var tunnelAddress: String?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("连接 LocalDevVPN", systemImage: "network")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 20) {
+            Spacer()
+            Image(systemName: "network")
+                .font(.system(size: 44))
+                .foregroundStyle(.tint)
+            Text("连接 LocalDevVPN")
+                .font(.largeTitle.bold())
+            Text("打开 LocalDevVPN 并连接回环模式，然后返回 CarrierLock。")
+                .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 10) {
-                guideStep(number: 1, text: "打开 LocalDevVPN，选择 Loopback（回环）模式。")
-                guideStep(number: 2, text: "回环地址使用 10.7.0.1 或 127.0.0.1。")
-                guideStep(number: 3, text: "点“连接”并允许 VPN 配置，然后返回 CarrierLock。")
-                guideStep(number: 4, text: "点“检查连接”，确认 Airlift 服务可用。")
-            }
-
-            Button {
-                openLocalDevVPN()
-            } label: {
-                SetupActionLabel("打开 LocalDevVPN", systemImage: "arrow.up.forward.app")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-
-            if let connectionError {
-                Label(connectionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-
-                Button(role: .destructive, action: onPairAgain) {
-                    SetupActionLabel("重新配对这台 iPhone", systemImage: "arrow.uturn.backward")
-                }
+            Button("打开 LocalDevVPN", action: openLocalDevVPN)
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+
+            if let connectionError {
+                Text(connectionError)
+                    .foregroundStyle(.red)
+                Button("重新配对", action: onPairAgain)
+                    .font(.footnote)
             }
 
+            networkStatusRow
+            Spacer()
+
             Button(action: onCheck) {
-                SetupActionLabel(
-                    checking ? "正在检查连接" : "检查连接",
-                    systemImage: "antenna.radiowaves.left.and.right",
-                    busyTitle: "正在检查连接",
-                    isBusy: checking
-                )
+                if checking {
+                    ProgressView("正在检查连接…")
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("检查并进入")
+                        .frame(maxWidth: .infinity)
+                }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(checking)
         }
+        .padding(24)
+        .onAppear {
+            tunnelAddress = NetworkStatus.tunnelInterfaceAddress
+        }
     }
 
-    private func guideStep(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(number)")
-                .font(.caption.bold())
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(.tint))
+    private var networkStatusRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            statusLine(
+                symbol: "wifi",
+                label: "Wi-Fi",
+                value: NetworkStatus.wifiActive
+                    ? (NetworkStatus.interfaces().first { $0.name == "en0" && $0.isUp }?.ipv4 ?? "已连接")
+                    : "未连接"
+            )
+            statusLine(
+                symbol: "network.badge.shield.half.filled",
+                label: "LocalDevVPN",
+                value: tunnelAddress ?? "未连接"
+            )
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
+    }
 
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+    private func statusLine(symbol: String, label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .frame(width: 18)
+            Text(label)
+            Spacer(minLength: 8)
+            Text(verbatim: value)
+                .font(.footnote.monospaced())
+                .multilineTextAlignment(.trailing)
         }
     }
 
@@ -263,57 +355,4 @@ struct LocalDevVPNGuideCard: View {
             }
         }
     }
-}
-
-struct SetupTroubleshootingCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("故障排查", systemImage: "ladybug")
-                .font(.headline)
-
-            ForEach(troubleshootingItems, id: \.problem) { item in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.problem)
-                        .font(.subheadline.weight(.medium))
-                    Text(item.solution)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private struct Item {
-        let problem: String
-        let solution: String
-    }
-
-    private var troubleshootingItems: [Item] {
-        [
-            Item(
-                problem: "设置里没有出现配对入口",
-                solution: "保持 CarrierLock 打开并连接 Wi-Fi，然后到 设置 › CarrierLock › 本地网络 打开权限。"
-            ),
-            Item(
-                problem: "PIN 输入失败或消失",
-                solution: "取消当前尝试后重新开始配对，等待期间不要锁屏。"
-            ),
-            Item(
-                problem: "LocalDevVPN 检测失败",
-                solution: "确认回环模式使用 10.7.0.1 或 127.0.0.1，断开再重新连接 VPN，然后重新检查。"
-            ),
-            Item(
-                problem: "已有配对文件但 Airlift 仍失败",
-                solution: "配对文件可能属于其他设备或主机。重新配对这台 iPhone，再重新连接 LocalDevVPN。"
-            )
-        ]
-    }
-}
-
-#Preview("Checklist") {
-    SetupChecklistRow(
-        title: "LocalDevVPN",
-        detail: "回环模式 · 10.7.0.1 或 127.0.0.1",
-        status: .active
-    )
 }
