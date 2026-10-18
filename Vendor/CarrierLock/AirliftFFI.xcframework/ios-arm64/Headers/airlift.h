@@ -99,6 +99,15 @@ int32_t al_exploit_read_file(const char *pairing_path,
                               size_t *out_len,
                               char **out_error);
 
+// Install a carrier IPCC trigger through InstallationProxy, then wait for
+// CommCenter to rescan carrier bundles. Blocks - run off the main thread.
+// Returns 0 on success, 1 on error (with out_error set).
+int32_t al_install_carrier_trigger(const char *pairing_path,
+                                    const char *ipcc_path,
+                                    ALLogCallback log_cb,
+                                    void *ctx,
+                                    char **out_error);
+
 // Free bytes returned by al_exploit_read_file().
 
 // Read one absolute iOS directory tree through a transactional AirTraffic

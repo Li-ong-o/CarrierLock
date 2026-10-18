@@ -319,7 +319,7 @@ final class CarrierService: ObservableObject {
             throw CarrierError.invalidBundle(invalidBundles.first ?? "(empty)")
         }
 
-        busyMessage = String(localized: "正在准备干净基线…")
+        busyMessage = String(localized: "正在检查当前锁定情况…")
         mode = .locking
         defer { busyMessage = nil }
 
@@ -360,7 +360,7 @@ final class CarrierService: ObservableObject {
             }
         }
 
-        busyMessage = String(localized: "写入完成，等待目录状态稳定…")
+        busyMessage = String(localized: "写入完成，等待系统同步…")
         try await Task.sleep(for: .seconds(5))
 
         busyMessage = String(localized: "正在验证 IMSI 链接…")
