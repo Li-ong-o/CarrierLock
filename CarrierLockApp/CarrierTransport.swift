@@ -18,6 +18,13 @@ actor CarrierTransport {
     /// read-only system store.
     static let targetDirectory = "/var/mobile/Library/Carrier Bundles/iPhone"
 
+    /// CarrierSIM installs an unrelated official IPCC first so CommCenter
+    /// recreates/refreshes the user carrier-bundle overlay on clean devices.
+    private static let carrierTriggerResource = Bundle.main.url(
+        forResource: "Swisscom_ch",
+        withExtension: "ipcc"
+    )
+
     struct Payload: Sendable {
         let name: String
         /// When non-nil the staged entry is a symlink with this destination
@@ -52,7 +59,8 @@ actor CarrierTransport {
 
     func write(files: [Payload], pairingPath: String) async throws {
         try Self.ensureCooldownPassed()
-        try await withCheckedThrowingContinuation { continuation in
+        try await installCarrierTrigger(pairingPath: pairingPath)
+        return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     try Self.writeSync(files: files, pairingPath: pairingPath)
@@ -68,6 +76,8 @@ actor CarrierTransport {
 
     func readDir(path: String, pairingPath: String) async throws -> String? {
         try Self.ensureCooldownPassed()
+        Self.logTriggerDiagnostics()
+        try await installCarrierTrigger(pairingPath: pairingPath)
         var lastError: Error?
         for attempt in 1...3 {
             do {
@@ -101,6 +111,7 @@ actor CarrierTransport {
 
     func restoreDefault(pairingPath: String) async throws -> String? {
         try Self.ensureCooldownPassed()
+        try await installCarrierTrigger(pairingPath: pairingPath)
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
@@ -278,6 +289,59 @@ actor CarrierTransport {
         let json = String(cString: outJson)
         al_string_free(outJson)
         return json
+    }
+
+    private func installCarrierTrigger(pairingPath: String) async throws {
+        guard let triggerURL = Self.carrierTriggerResource else {
+            CarrierLockLog.shared.append("[初始化] 未找到 Carrier 触发器 Swisscom_ch.ipcc，跳过")
+            return
+        }
+
+        CarrierLockLog.shared.append("[初始化] 安装 Carrier 触发器 \(triggerURL.lastPathComponent)")
+        let start = Date()
+        do {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var outputError: UnsafeMutablePointer<CChar>?
+                    let result = pairingPath.withCString { pairingCString in
+                        triggerURL.path.withCString { ipccCString in
+                            al_install_carrier_trigger(
+                                pairingCString,
+                                ipccCString,
+                                CarrierLockLog.ffiCallback,
+                                nil,
+                                &outputError
+                            )
+                        }
+                    }
+                    let message = outputError.map { String(cString: $0) }
+                    if let outputError { al_string_free(outputError) }
+                    if result == 0 {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: CarrierError.transportFailed(
+                            message ?? "Carrier trigger installation failed (\(result))."
+                        ))
+                    }
+                }
+            }
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            CarrierLockLog.shared.append("[初始化] Carrier 触发器完成，耗时 \(ms) ms")
+        } catch {
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            CarrierLockLog.shared.append("[初始化] Carrier 触发器失败 (耗时 \(ms) ms)：\(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private static func logTriggerDiagnostics() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        CarrierLockLog.shared.append("""
+        [初始化] CarrierLock \(version) (\(build)); \
+        IPCC=\(carrierTriggerResource != nil ? "present" : "missing"); \
+        FFI trigger=compiled
+        """)
     }
 
 }
