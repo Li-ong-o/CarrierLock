@@ -2,7 +2,10 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-shasum -a 256 -c Vendor/CarrierLock/SHA256SUMS
+(
+  cd Vendor/CarrierLock
+  shasum -a 256 -c SHA256SUMS
+)
 
 # Symbol names in a Mach-O static archive are stored as plain null-terminated
 # byte strings in the object string tables, regardless of which LLVM version
