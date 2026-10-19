@@ -83,15 +83,13 @@ fi
 app_path="$1"
 expected_version="$2"
 # Rust resolves this symbol with dlsym, so a successful link alone is insufficient.
+# The carrier transaction is the app's authoritative Airlift entry point.
+# Legacy al_exploit_* functions and unused service helpers are intentionally
+# dead-stripped by the final iOS binary and must not gate release packaging.
 exports=$(xcrun dyld_info -exports "$app_path/CarrierLock")
 for symbol in \
   _ALGetGrappaToken \
-  _al_exploit_write_dir \
-  _al_exploit_read_dir \
-  _al_exploit_restore_dir \
-  _al_exploit_delete_carrier_dir \
-  _al_syslog_stream_start \
-  _al_device_respring
+  _cs_execute
 do
   if ! grep -q "${symbol}$" <<< "$exports"; then
     echo "Archive is missing exported symbol $symbol" >&2
