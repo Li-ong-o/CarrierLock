@@ -1,453 +1,486 @@
 import Combine
 import Foundation
-import UIKit
-
-enum CarrierError: LocalizedError {
-    case unsupported
-    case pairingRequired
-    case invalidIMSI(String)
-    case invalidBundle(String)
-    case symlinkFailed(String)
-    case transportFailed(String)
-    case connectionFailed(String)
-    case directoryReadFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .unsupported:
-            String(localized: "This device or system version is not supported.")
-        case .pairingRequired:
-            String(localized: "Pair this iPhone and connect LocalDevVPN before locking the carrier profile.")
-        case .invalidIMSI(let value):
-            String(format: String(localized: "Invalid IMSI: %@"), value)
-        case .invalidBundle(let name):
-            String(format: String(localized: "Invalid bundle name: %@"), name)
-        case .symlinkFailed(let reason):
-            String(format: String(localized: "Could not build carrier bundle link: %@"), reason)
-        case .transportFailed(let reason):
-            String(format: String(localized: "AirLift write failed: %@"), reason)
-        case .connectionFailed(let reason):
-            String(format: String(localized: "Cannot reach the AirLift tunnel. Make sure Wi-Fi is connected and LocalDevVPN is active, then retry.\n\nTechnical details: %@"), reason)
-        case .directoryReadFailed(let reason):
-            String(format: String(localized: "Carrier directory verification is temporarily unavailable: %@\n\nThe write operation may have completed. Wait a few seconds, then tap Check Lock Status again."), reason)
-        }
-    }
-}
 
 @MainActor
 final class CarrierService: ObservableObject {
-    enum LockMode: Equatable {
+    enum Mode: Equatable {
         case idle
+        case working
         case locking
-        case locked(links: [String: String])
+        case locked
         case failed(String)
     }
 
-    @Published private(set) var mode: LockMode = .idle
-    @Published private(set) var bundleName: String = "CMCC_cn"
-    @Published var customBundlesByIMSI: [String: String] = [:]
-    @Published private(set) var detectedIMSIs: [String] = []
-    @Published private(set) var busyMessage: String?
-    @Published private(set) var needsAirliftSetup = false
-    @Published private(set) var detection: CarrierDetection?
-    @Published private(set) var verifiedLinks: [String: String] = [:]
-    @Published private(set) var verifyMessage: String?
-    @Published private(set) var isCheckingStatus = false
-
     static let shared = CarrierService()
-    private init() {
-        // Carrier detection is informational only. IMSI and bundle are
-        // intentionally left for the user to choose; MEP devices often
-        // expose the wrong IMSI through the public APIs.
-        detectCarrier()
-    }
 
-    func detectCarrier() {
-        detection = CarrierDetectionService.detect()
-    }
+    @Published private(set) var mode: Mode = .idle
+    @Published private(set) var isWorking = false
+    @Published private(set) var isCheckingStatus = false
+    @Published private(set) var latestResult: CarrierSIMResult?
+    @Published private(set) var device: CarrierDeviceInfo?
+    @Published private(set) var sims: [CarrierSIMInfo] = []
+    @Published private(set) var imsiLinks: [CarrierIMSILink] = []
+    @Published private(set) var extraIMSILinks: [CarrierIMSILink] = []
+    @Published private(set) var availableSlots: Set<String> = ["kOne", "kTwo"]
+    @Published private(set) var needsRecovery = false
+    @Published private(set) var hasLoadedStatus = false
+    @Published private(set) var busyMessage: String?
+    @Published private(set) var statusMessage: String?
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var isAfterSuccessfulApply = false
 
-    var monitoredBundleName: String {
-        if case .locked(let links) = mode {
-            return links.values.sorted().first ?? bundleName
+    @Published var selectedSlots: Set<String> {
+        didSet {
+            UserDefaults.standard.set(sortedSlots, forKey: Self.selectedSlotsKey)
         }
-        return bundleName
     }
 
-    var selectedIMSIs: [String] {
-        detectedIMSIs
+    @Published var bundleName: String {
+        didSet {
+            UserDefaults.standard.set(bundleName, forKey: Self.bundleNameKey)
+        }
     }
 
-    func bundle(forIMSI imsi: String) -> String {
-        if let custom = customBundlesByIMSI[imsi]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !custom.isEmpty {
-            return custom
+    @Published var bundleBySlot: [String: String] {
+        didSet {
+            UserDefaults.standard.set(bundleBySlot, forKey: Self.bundleBySlotKey)
+            if oldValue.count != bundleBySlot.count {
+                return
+            }
+
+            var changedSlots = Set(oldValue.keys).intersection(bundleBySlot.keys)
+            changedSlots = changedSlots.filter { oldValue[$0] != bundleBySlot[$0] }
+
+            for slot in changedSlots {
+                automaticBundleSlots.remove(slot)
+            }
+        }
+    }
+
+    @Published private(set) var automaticBundleSlots: Set<String> = []
+
+    private var hasAutoSelectedBundles = false {
+        didSet {
+            UserDefaults.standard.set(hasAutoSelectedBundles, forKey: Self.hasAutoSelectedBundlesKey)
+        }
+    }
+
+    private let transport = CarrierSIMTransport.shared
+    private static let selectedSlotsKey = "carrierlock.selectedSlots"
+    private static let bundleNameKey = "carrierlock.bundleName"
+    private static let bundleBySlotKey = "carrierlock.bundleBySlot"
+    private static let hasAutoSelectedBundlesKey = "carrierlock.hasAutoSelectedBundles"
+
+    init() {
+        let savedSlots = UserDefaults.standard.stringArray(forKey: Self.selectedSlotsKey) ?? ["kOne", "kTwo"]
+        let initialSlots = Set(savedSlots.filter { $0 == "kOne" || $0 == "kTwo" })
+        self.selectedSlots = initialSlots.isEmpty ? ["kOne", "kTwo"] : initialSlots
+        let savedBundles = UserDefaults.standard.dictionary(forKey: Self.bundleBySlotKey) as? [String: String] ?? [:]
+        let initialBundle = UserDefaults.standard.string(forKey: Self.bundleNameKey) ?? "CMCC_cn"
+        self.bundleName = initialBundle
+        self.bundleBySlot = [
+            "kOne": savedBundles["kOne"] ?? initialBundle,
+            "kTwo": savedBundles["kTwo"] ?? initialBundle,
+        ]
+        self.hasAutoSelectedBundles = UserDefaults.standard.bool(forKey: Self.hasAutoSelectedBundlesKey)
+    }
+
+    var sortedSlots: [String] {
+        ["kOne", "kTwo"].filter(selectedSlots.contains)
+    }
+
+    var needsAirliftSetup: Bool {
+        let pairingPath = PairingController.pairingFilePath()
+        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
+        return size <= 0 || Bundle.main.url(forResource: "assets", withExtension: "zip") == nil
+    }
+
+    var canApply: Bool {
+        guard hasLoadedStatus,
+              !isWorking,
+              !needsRecovery,
+              !sortedSlots.isEmpty,
+              selectedSlots.isSubset(of: availableSlots),
+              latestResult?.canApply == true else {
+            return false
+        }
+        return true
+    }
+
+    var selectedSims: [CarrierSIMInfo] {
+        sims.filter { selectedSlots.contains($0.slot) }
+    }
+
+    var allSelectedSimsLocked: Bool {
+        guard hasLoadedStatus, !selectedSims.isEmpty else { return false }
+        return selectedSims.allSatisfy { sim in
+            imsiLinks.contains { $0.imsi == sim.imsi }
+        }
+    }
+
+    func bundle(for slot: String) -> String {
+        bundleBySlot[slot] ?? bundleName
+    }
+
+    func isAutomaticBundle(for slot: String) -> Bool {
+        automaticBundleSlots.contains(slot)
+    }
+
+    func suggestedBundle(for sim: CarrierSIMInfo) -> String? {
+        Self.suggestedBundle(mcc: sim.mcc, mnc: sim.mnc)
+    }
+
+    func autoMatchBundle(for sim: CarrierSIMInfo) -> Bool {
+        guard let suggested = suggestedBundle(for: sim) else { return false }
+        bundleBySlot[sim.slot] = suggested
+        automaticBundleSlots.insert(sim.slot)
+        return true
+    }
+
+    func setBundle(_ bundle: String, for slot: String) {
+        bundleBySlot[slot] = bundle
+        automaticBundleSlots.remove(slot)
+    }
+
+    static func suggestedBundle(mcc: String, mnc: String) -> String? {
+        let mcc = mcc.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mnc = mnc.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard mcc.count == 3, (2...3).contains(mnc.count),
+              mcc.allSatisfy(\.isNumber), mnc.allSatisfy(\.isNumber) else {
+            return nil
         }
 
-        if let prefix = CarrierDetectionService.prefixCandidate(for: imsi),
-           let automatic = CarrierDetectionService.bundle(for: prefix) {
-            return automatic
-        }
+        // Some lockdownd sources return 2-digit MNCs while bundle metadata uses
+        // the decimal form without a leading zero (460+07 -> 46007).
+        let candidates = [
+            mcc + mnc,
+            mnc.hasPrefix("0") ? mcc + String(mnc.dropFirst()) : nil
+        ].compactMap { $0 }
 
-        return bundleName
+        for candidate in candidates where CarrierBundlePLMNMap.bundleByPLMN[candidate] != nil {
+            return CarrierBundlePLMNMap.bundleByPLMN[candidate]
+        }
+        return nil
     }
 
-    func lock() async {
-        guard mode != .locking else { return }
-        CarrierLockLog.shared.append("[锁定] 开始锁定运营商配置")
+    func ensureInitialStatus() async {
+        guard !hasLoadedStatus, !isWorking, !needsAirliftSetup else { return }
+        await refreshStatus()
+    }
+
+    func refreshStatus() async {
+        guard begin(action: .status, busyMessage: "正在检查运营商配置…") else { return }
+        isCheckingStatus = true
+        defer { finishWorking() }
+
         do {
-            try await run()
-            CarrierLockLog.shared.append("[锁定] 成功：\(modeSummary)")
+            var result = try await transport.execute(
+                action: .status,
+                slots: sortedSlots,
+                bundle: bundleName
+            )
+
+            if result.isFailure, sortedSlots.count == 2 {
+                let one = try await transport.execute(
+                    action: .status,
+                    slots: ["kOne"],
+                    bundle: bundleName
+                )
+                let two = try await transport.execute(
+                    action: .status,
+                    slots: ["kTwo"],
+                    bundle: bundleName
+                )
+
+                if !one.isFailure || !two.isFailure {
+                    result = Self.mergeStatusResults(one, two)
+                }
+            }
+
+            process(result, action: .status)
         } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            CarrierLockLog.shared.append("[锁定] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[锁定] 原始错误：\(error.localizedDescription)")
-            mode = .failed(normalizedError.localizedDescription)
-            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
+            process(error: error, action: .status)
         }
+    }
+
+    func apply() async {
+        guard sortedSlots.count > 0 else {
+            errorMessage = "请至少选择一个 SIM 卡槽。"
+            return
+        }
+        await run(action: .apply, busyMessage: "正在锁定运营商配置…")
     }
 
     func restore() async {
-        guard mode != .locking else { return }
-        CarrierLockLog.shared.append("[恢复] 开始移除 IMSI 锁定链接")
-        do {
-            let pairingPath = PairingController.pairingFilePath()
-            let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-            guard size > 0 else { throw CarrierError.pairingRequired }
-
-            busyMessage = String(localized: "正在移除 IMSI 锁定链接…")
-            mode = .locking
-            defer { busyMessage = nil }
-
-            guard let json = try await CarrierTransport.shared.restoreDefault(pairingPath: pairingPath),
-                  let data = json.data(using: .utf8),
-                  let result = try? JSONDecoder().decode(RestoreResult.self, from: data),
-                  result.ok else {
-                throw CarrierError.transportFailed("AirLift restore returned no result.")
-            }
-
-            verifiedLinks = [:]
-            if result.changed {
-                verifyMessage = String(
-                    format: String(localized: "已移除 %d 个 IMSI 链接。请稍等几秒后点击“检查锁定状态”确认。"),
-                    result.removed
-                )
-            } else {
-                verifyMessage = String(localized: "当前已经是默认配置，未发现 IMSI 链接。")
-            }
-            CarrierLockLog.shared.append("[恢复] 成功：\(verifyMessage ?? "")")
-            CarrierLockLog.shared.append("[恢复] FFI 结果：before=\(result.before), removed=\(result.removed), after=\(result.after)")
-            mode = .idle
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            CarrierLockLog.shared.append("[恢复] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[恢复] 原始错误：\(error.localizedDescription)")
-            mode = .failed(normalizedError.localizedDescription)
-            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
-        }
+        await run(action: .restore, busyMessage: "正在恢复…")
     }
 
-    func resetCarrierConfiguration() async {
-        guard mode != .locking, !isCheckingStatus else { return }
-        CarrierLockLog.shared.append("[重置] 开始清空用户态运营商配置目录")
-
-        do {
-            let pairingPath = PairingController.pairingFilePath()
-            let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-            guard size > 0 else { throw CarrierError.pairingRequired }
-
-            busyMessage = String(localized: "正在重置运营商配置…")
-            mode = .locking
-            defer { busyMessage = nil }
-
-            guard let json = try await CarrierTransport.shared.deleteCarrierDirectory(pairingPath: pairingPath),
-                  let data = json.data(using: .utf8),
-                  let result = try? JSONDecoder().decode(RestoreResult.self, from: data),
-                  result.ok else {
-                throw CarrierError.transportFailed("AirLift carrier reset returned no result.")
-            }
-
-            verifiedLinks = [:]
-            verifyMessage = result.changed
-                ? String(format: String(localized: "已清空用户态运营商配置目录，共移除 %d 个项目。"), result.removed)
-                : String(localized: "用户态运营商配置目录已经是空的。")
-            CarrierLockLog.shared.append("[重置] 成功：\(verifyMessage ?? "")")
-            CarrierLockLog.shared.append("[重置] FFI 结果：before=\(result.before), removed=\(result.removed), after=\(result.after)")
-            mode = .idle
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            CarrierLockLog.shared.append("[重置] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[重置] 原始错误：\(error.localizedDescription)")
-            mode = .failed(normalizedError.localizedDescription)
-            needsAirliftSetup = shouldOfferAirliftSetup(for: normalizedError)
-        }
-    }
-
-    func lockWithFallback() async {
-        guard mode != .locking else { return }
-        mode = .failed(
-            String(localized: "iOS App 端写入受限，请使用电脑 CarrierSIM 完成锁定。\n\n命令：CarrierSIM --bundle CMCC_cn --sims 1")
-        )
-    }
-
-    func checkLockStatus() async {
-        guard mode != .locking, !isCheckingStatus else { return }
-        isCheckingStatus = true
-        defer { isCheckingStatus = false }
-        CarrierLockLog.shared.append("[检查] 开始读取运营商配置目录")
-        verifyMessage = nil
-        verifiedLinks = [:]
-
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
-            verifyMessage = String(localized: "缺少配对文件，无法检查锁定状态。")
-            CarrierLockLog.shared.append("[检查] 失败：缺少配对文件")
-            return
-        }
-
-        busyMessage = String(localized: "正在读取运营商配置目录…")
-        defer { busyMessage = nil }
-
-        do {
-            let links = try await readLockLinks(pairingPath: pairingPath)
-            verifiedLinks = links
-            verifyMessage = links.isEmpty
-                ? String(localized: "未检测到 IMSI 锁定链接。")
-                : String(format: String(localized: "检测到 %d 个 IMSI 已锁定。"), links.count)
-            CarrierLockLog.shared.append("[检查] 成功：\(verifyMessage ?? "")")
-            for imsi in links.keys.sorted() {
-                CarrierLockLog.shared.append("[检查] \(imsi) -> \(links[imsi] ?? "未知目标")")
-            }
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            verifyMessage = String(format: String(localized: "检查失败：%@"), normalizedError.localizedDescription)
-            CarrierLockLog.shared.append("[检查] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[检查] 原始错误：\(error.localizedDescription)")
-        }
-    }
-
-    struct RestoreResult: Codable {
-        let ok: Bool
-        let changed: Bool
-        let removed: Int
-        let before: Int
-        let after: Int
-    }
-
-    private func readLockLinks(pairingPath: String) async throws -> [String: String] {
-        guard let json = try await CarrierTransport.shared.readDir(
-            path: CarrierTransport.targetDirectory,
-            pairingPath: pairingPath
-        ) else {
-            throw CarrierError.transportFailed("AirLift read dir returned no JSON.")
-        }
-        return try Self.parseIMSILinks(from: json)
-    }
-
-    nonisolated static func normalizeTransportError(_ error: Error) -> CarrierError {
-        guard let carrierError = error as? CarrierError else {
-            return .transportFailed(error.localizedDescription)
-        }
-
-        if case .transportFailed(let reason) = carrierError,
-           reason.localizedCaseInsensitiveContains("RemoteXPC timed out")
-            || reason.localizedCaseInsensitiveContains("loopback VPN") {
-            return .connectionFailed(reason)
-        }
-
-        if case .transportFailed(let reason) = carrierError,
-           reason.localizedCaseInsensitiveContains("did not export")
-            || reason.localizedCaseInsensitiveContains("AssetManifest not observed") {
-            return .directoryReadFailed(reason)
-        }
-
-        return carrierError
-    }
-
-    /// Parses the JSON tree from al_exploit_read_dir and returns IMSI symlinks
-    /// (15-digit numeric names) mapped to their resolved bundle names.
-    nonisolated static func parseIMSILinks(from json: String) throws -> [String: String] {
-        guard let data = json.data(using: .utf8),
-              let root = try? JSONDecoder().decode(DirNode.self, from: data) else {
-            throw CarrierError.transportFailed("Could not parse directory JSON.")
-        }
-        var result: [String: String] = [:]
-        collectIMSILinks(node: root, into: &result)
-        return result
-    }
-
-    nonisolated private static func collectIMSILinks(node: DirNode, into result: inout [String: String]) {
-        let name = URL(fileURLWithPath: "/" + node.path).lastPathComponent
-        if node.type == "symlink",
-           name.count == 15,
-           name.allSatisfy(\.isNumber) {
-            result[name] = bundleName(fromTarget: node.target ?? "")
-        }
-        if let children = node.children {
-            for child in children {
-                collectIMSILinks(node: child, into: &result)
-            }
-        }
-    }
-
-    nonisolated private static func bundleName(fromTarget target: String) -> String {
-        guard let last = target.split(separator: "/").last else { return "未知目标" }
-        return last.hasSuffix(".bundle") ? String(last.dropLast(".bundle".count)) : String(last)
-    }
-
-    nonisolated private struct DirNode: Codable {
-        let path: String
-        let type: String
-        let size: Int?
-        let target: String?
-        let children: [DirNode]?
+    func recover() async {
+        await run(action: .recover, busyMessage: "正在恢复未完成操作…")
     }
 
     func dismissFailure() {
-        if case .failed = mode {
+        guard case .failed = mode else { return }
+        mode = .idle
+        errorMessage = nil
+        busyMessage = nil
+    }
+
+    private func run(action: CarrierSIMAction, busyMessage: String) async {
+        guard begin(action: action, busyMessage: busyMessage) else { return }
+        defer { finishWorking() }
+
+        do {
+            var assignments: [String: String] = [:]
+            if action == .apply {
+                assignments = selectedSims.reduce(into: [:]) { result, sim in
+                    result[sim.imsi] = bundle(for: sim.slot)
+                }
+            }
+
+            let result = try await transport.execute(
+                action: action,
+                slots: sortedSlots,
+                bundle: bundleName,
+                assignments: assignments
+            )
+            process(result, action: action)
+        } catch {
+            process(error: error, action: action)
+        }
+    }
+
+    private func begin(action: CarrierSIMAction, busyMessage: String) -> Bool {
+        guard !isWorking else { return false }
+        isAfterSuccessfulApply = false
+        isWorking = true
+        self.busyMessage = busyMessage
+        errorMessage = nil
+        statusMessage = nil
+        if action == .status {
+            isCheckingStatus = true
+            mode = .working
+        } else if action == .apply {
+            mode = .locking
+        } else {
+            mode = .working
+        }
+        return true
+    }
+
+    private func finishWorking() {
+        isWorking = false
+        isCheckingStatus = false
+        busyMessage = nil
+    }
+
+    private func process(_ result: CarrierSIMResult, action: CarrierSIMAction) {
+        latestResult = result
+        if let device = result.device {
+            self.device = device
+        }
+        if !result.sims.isEmpty {
+            sims = result.sims.sorted { $0.displaySlot < $1.displaySlot }
+            availableSlots = Set(result.sims.map(\.slot))
+        }
+        imsiLinks = result.imsiLinks
+        extraIMSILinks = result.imsiLinks.filter { link in
+            !sims.contains { $0.imsi == link.imsi }
+        }
+        needsRecovery = result.needsRecovery
+        if action == .status {
+            hasLoadedStatus = true
+            reconcileSelectedSlots()
+            if !result.isFailure {
+                autoSelectBundlesFromPLMN()
+            }
+        }
+
+        if result.isFailure {
+            let message = Self.localizedCarrierMessage(result.rawError ?? result.message ?? result.reason)
+            errorMessage = message
+            statusMessage = nil
+            mode = .failed(message)
+            return
+        }
+
+        errorMessage = nil
+        if action == .status, !selectedStatusText(result).isEmpty {
+            statusMessage = selectedStatusText(result)
+        } else {
+            statusMessage = Self.statusText(for: result, action: action)
+        }
+        if action == .apply, result.returnCode == 0 {
+            mode = .locked
+            isAfterSuccessfulApply = true
+        } else {
             mode = .idle
         }
     }
 
-    func toggleDetectedIMSI(_ value: String) {
-        guard let index = detectedIMSIs.firstIndex(of: value) else { return }
-        detectedIMSIs.remove(at: index)
+    private func process(error: Error, action: CarrierSIMAction) {
+        let message = Self.localizedCarrierMessage(error.localizedDescription)
+        errorMessage = message
+        statusMessage = nil
+        if action == .status {
+            hasLoadedStatus = true
+        }
+        mode = .failed(message)
     }
 
-    func selectDetectedIMSI(_ value: String) {
-        guard value.count == 15, value.allSatisfy(\.isNumber),
-              !detectedIMSIs.contains(value) else { return }
-        // Re-selecting a captured IMSI restores PLMN-based resolution. This
-        // prevents an old manual override from silently winning on retry.
-        customBundlesByIMSI[value] = nil
-        detectedIMSIs.append(value)
-        detectedIMSIs.sort()
+    private func reconcileSelectedSlots() {
+        if !selectedSlots.isSubset(of: availableSlots) {
+            selectedSlots = selectedSlots.intersection(availableSlots)
+        }
+        if selectedSlots.isEmpty {
+            selectedSlots = availableSlots
+        }
     }
 
-    private func run() async throws {
-        guard SystemCompatibility.isSupported else {
-            throw CarrierError.unsupported
+    private func autoSelectBundlesFromPLMN() {
+        guard !hasAutoSelectedBundles, !sims.isEmpty else { return }
+
+        var selections = bundleBySlot
+        for sim in sims {
+            guard let suggested = Self.suggestedBundle(mcc: sim.mcc, mnc: sim.mnc) else { continue }
+            selections[sim.slot] = suggested
+            automaticBundleSlots.insert(sim.slot)
         }
 
-        let pairingPath = PairingController.pairingFilePath()
-        let size = (try? FileManager.default.attributesOfItem(atPath: pairingPath)[.size] as? Int) ?? 0
-        guard size > 0 else {
-            throw CarrierError.pairingRequired
-        }
+        bundleBySlot = selections
+        hasAutoSelectedBundles = true
+    }
 
-        let imsis = selectedIMSIs
-        guard !imsis.isEmpty else {
-            throw CarrierError.invalidIMSI("(empty)")
-        }
+    private static func mergeStatusResults(_ one: CarrierSIMResult, _ two: CarrierSIMResult) -> CarrierSIMResult {
+        let deviceJSON = (one.device ?? two.device).map(deviceJSON(_:))
+        let simsJSON = (one.sims + two.sims)
+            .sorted { $0.displaySlot < $1.displaySlot }
+            .map(simJSON(_:))
+        let object: [String: Any] = [
+            "action": "status",
+            "device": deviceJSON ?? NSNull(),
+            "sims": simsJSON,
+            "imsi_links": (one.imsiLinks + two.imsiLinks).map { ["imsi": $0.imsi, "bundle": $0.bundle] },
+            "needs_recovery": one.needsRecovery || two.needsRecovery,
+            "can_apply": one.canApply && two.canApply,
+            "reason": one.reason ?? two.reason ?? NSNull(),
+            "warning": one.warning ?? two.warning ?? NSNull(),
+            "catalog_verified": one.catalogVerified || two.catalogVerified,
+            "commcenter_verified": one.commcenterVerified || two.commcenterVerified,
+            "error": one.error && two.error,
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data()
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        return (try? CarrierSIMResult(returnCode: 0, rawJSON: raw, rawError: nil)) ?? one
+    }
 
-        let invalidIMSIs = imsis.filter { $0.count != 15 || !$0.allSatisfy(\.isNumber) }
-        guard invalidIMSIs.isEmpty else {
-            throw CarrierError.invalidIMSI(invalidIMSIs.joined(separator: ", "))
-        }
+    private static func deviceJSON(_ device: CarrierDeviceInfo) -> [String: Any] {
+        [
+            "identity_hash": device.identityHash,
+            "name": device.name,
+            "model": device.model,
+            "hardware": device.hardware,
+            "ios": device.ios,
+            "build": device.build,
+            "activated": device.activated,
+        ]
+    }
 
-        let links = Dictionary(uniqueKeysWithValues: imsis.map { imsi in
-            (imsi, bundle(forIMSI: imsi))
-        })
-        let invalidBundles = links.values.filter {
-            $0.isEmpty || !$0.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" })
-        }
-        guard invalidBundles.isEmpty else {
-            throw CarrierError.invalidBundle(invalidBundles.first ?? "(empty)")
-        }
+    private static func simJSON(_ sim: CarrierSIMInfo) -> [String: Any] {
+        [
+            "slot": sim.slot,
+            "mcc": sim.mcc,
+            "mnc": sim.mnc,
+            "imsi": sim.imsi,
+            "carrier": sim.carrier,
+            "version": sim.version,
+        ]
+    }
 
-        busyMessage = String(localized: "正在检查当前锁定情况…")
-        mode = .locking
-        defer { busyMessage = nil }
-
-
-        do {
-            let baseline = try await readLockLinks(pairingPath: pairingPath)
-            CarrierLockLog.shared.append("[基线] 目录读取成功，检测到 \(baseline.count) 个已有 IMSI 链接")
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            CarrierLockLog.shared.append("[基线] 失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[基线] 原始错误：\(error.localizedDescription)")
-            throw normalizedError
-        }
-
-        let orderedLinks = links.sorted(by: { $0.key < $1.key })
-        for (index, link) in orderedLinks.enumerated() {
-            let payload = try buildSymlinkPayload(
-                name: link.key,
-                target: "/System/Library/Carrier Bundles/iPhone/\(link.value).bundle"
-            )
-            busyMessage = String(
-                format: String(localized: "正在写入 IMSI 链接 %d/%d：%@ -> %@…"),
-                index + 1,
-                orderedLinks.count,
-                link.key,
-                link.value
-            )
-            // AirliftProbe's verified path stages exactly one IMSI symlink per
-            // AirTraffic transaction. Keep that shape even for multi-SIM locks.
-            try await CarrierTransport.shared.write(files: [payload], pairingPath: pairingPath)
-            if index + 1 < orderedLinks.count {
-                busyMessage = String(
-                    format: String(localized: "IMSI 链接 %d/%d 已写入，等待 AirTraffic 状态稳定…"),
-                    index + 1,
-                    orderedLinks.count
-                )
-                try await Task.sleep(for: .seconds(5))
+    private static func statusText(for result: CarrierSIMResult, action: CarrierSIMAction) -> String {
+        switch action {
+        case .status:
+            if result.needsRecovery {
+                return "检测到上次操作尚未完成。请先点击“恢复未完成操作”。"
             }
-        }
-
-        busyMessage = String(localized: "写入完成，等待系统同步…")
-        try await Task.sleep(for: .seconds(5))
-
-        busyMessage = String(localized: "正在验证 IMSI 链接…")
-        do {
-            let verified = try await readLockLinks(pairingPath: pairingPath)
-            let missing = links.filter { verified[$0.key] != $0.value }
-            guard missing.isEmpty else {
-                throw CarrierError.symlinkFailed("written links not found in readback: \(missing.keys.sorted().joined(separator: ", "))")
+            if result.imsiLinks.isEmpty {
+                return "未检测到 IMSI 链接。如需固定运营商配置，请继续锁定。"
             }
-
-            verifiedLinks = verified
-            verifyMessage = String(format: String(localized: "写入完成，%d 个 IMSI 链接已通过目录枚举验证。"), verified.count)
-            mode = .locked(links: links)
-        } catch {
-            let normalizedError = Self.normalizeTransportError(error)
-            verifiedLinks = [:]
-            verifyMessage = String(
-                format: String(localized: "写入已完成，但目录验证暂时失败，可能已锁定。请稍后点击“检查锁定状态”确认。技术详情：%@"),
-                normalizedError.localizedDescription
-            )
-            mode = .locked(links: links)
-            CarrierLockLog.shared.append("[锁定] 目录验证失败：\(normalizedError.localizedDescription)")
-            CarrierLockLog.shared.append("[锁定] 原始错误：\(error.localizedDescription)")
-            CarrierLockLog.shared.append("[锁定] 写入返回成功，等待用户稍后检查确认：\(modeSummary)")
+            if let reason = result.reason, !reason.isEmpty {
+                return localizedCarrierMessage(reason)
+            }
+            if result.canApply {
+                return "当前设备可以锁定。请确认 SIM 卡槽和运营商配置后继续。"
+            }
+            return "已读取设备状态。"
+        case .apply:
+            if result.returnCode == 0 {
+                return "锁定成功。已写入并回读确认 IMSI 链接，建议开关一次飞行模式，让系统重新读取配置。"
+            }
+            return localizedCarrierMessage(result.message) 
+        case .restore:
+            if result.isFullyVerified {
+                return "已恢复默认运营商选择。"
+            }
+            if result.returnCode == 2 {
+                return "恢复目录已确认，CommCenter 尚未确认最终选择。建议开关一次飞行模式。"
+            }
+            return localizedCarrierMessage(result.message)
+        case .recover:
+            return localizedCarrierMessage(result.message)
         }
     }
 
-    /// Builds a symlink payload; the transport stages the real link so
-    /// AirTraffic's recursive copy preserves it in the Overlay.
-    private func buildSymlinkPayload(name: String, target: String) throws -> CarrierTransport.Payload {
-        CarrierTransport.Payload(name: name, linkTarget: target)
+    private func selectedStatusText(_ result: CarrierSIMResult) -> String {
+        guard !sims.isEmpty else { return "" }
+        let lockedSims = sims.filter { sim in result.imsiLinks.contains { $0.imsi == sim.imsi } }
+        if lockedSims.count == sims.count {
+            return "已锁定。所有 SIM 的 IMSI 链接都已存在，无需重复写入。"
+        }
+        if !lockedSims.isEmpty {
+            return "部分 SIM 已锁定，还有 SIM 未锁定。请选择未锁定的 SIM 后继续锁定。"
+        }
+        return ""
     }
 
-    private func shouldOfferAirliftSetup(for error: Error) -> Bool {
-        guard let error = error as? CarrierError else { return false }
-        switch error {
-        case .pairingRequired, .transportFailed, .connectionFailed, .directoryReadFailed:
-            return true
-        case .unsupported, .invalidIMSI, .invalidBundle, .symlinkFailed:
-            return false
+    static func localizedCarrierWarning(_ warning: String) -> String {
+        if warning.lowercased().contains("версия") {
+            return "当前 iOS 版本不在 CarrierSIM 原始验证范围内，操作可能不完全兼容。"
         }
+        return warning
     }
 
-    private var modeSummary: String {
-        switch mode {
-        case .locked(let links):
-            links.sorted(by: { $0.key < $1.key })
-                .map { "\($0.key) -> \($0.value)" }
-                .joined(separator: ", ")
-        default:
-            "完成"
+    private static func localizedCarrierMessage(_ message: String?) -> String {
+        guard let message, !message.isEmpty else {
+            return "CarrierSIM 未返回详细说明。"
         }
+
+        let lower = message.lowercased()
+        if lower.contains("незаверш") ||
+            lower.contains("прошлая операция") ||
+            lower.contains("сначала нажмите") ||
+            lower.contains("сначала восстанов") {
+            return "上次操作未完成。请先点击“恢复未完成操作”，保留的备份会自动处理。"
+        }
+        if lower.contains("не активирован") || lower.contains("активирован") {
+            return "iPhone 未激活，无法执行该操作。"
+        }
+        if lower.contains("сим") ||
+            lower.contains("слот") ||
+            lower.contains("выберите") ||
+            lower.contains("найдена") ||
+            lower.contains("доступна") {
+            return "SIM 卡槽选择无效或所选 SIM 不可用，请检查 SIM 1/2 后重试。"
+        }
+        if lower.contains("версия ios") || lower.contains("сборки") {
+            return "当前 iOS 版本不在 CarrierSIM 原始验证范围内，操作可能不完全兼容。"
+        }
+        if lower.contains("файл сопряжения") {
+            return "配对文件不可用，请重新完成连接引导。"
+        }
+        if lower.contains("commcenter") {
+            return "CommCenter 尚未确认运营商选择，请开关一次飞行模式后重试。"
+        }
+        return message
     }
 }

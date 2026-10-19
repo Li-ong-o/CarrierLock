@@ -9,7 +9,10 @@ export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
 
 # Make ~/.cargo visible to non-login shells (Xcode build phases, CI)
 # shellcheck disable=SC1090
-source "$HOME/.cargo/env" 2>/dev/null || true
+if [ -d "$HOME/.cargo/bin" ]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 
 # Remap $HOME so absolute source paths don't appear in the binary's log output
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build"
@@ -29,10 +32,10 @@ cargo build --release --target aarch64-apple-ios-sim
 echo "==> Repackaging AirliftFFI.xcframework"
 rm -rf "$ROOT/AirliftFFI.xcframework"
 xcodebuild -create-xcframework \
-  -library rust-core/target/aarch64-apple-ios/release/libairlift_ffi.a \
-  -headers rust-core/include \
-  -library rust-core/target/aarch64-apple-ios-sim/release/libairlift_ffi.a \
-  -headers rust-core/include \
+  -library target/aarch64-apple-ios/release/libairlift_ffi.a \
+  -headers include \
+  -library target/aarch64-apple-ios-sim/release/libairlift_ffi.a \
+  -headers include \
   -output "$ROOT/AirliftFFI.xcframework"
 
 echo "==> Done."

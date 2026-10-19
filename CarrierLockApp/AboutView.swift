@@ -2,7 +2,6 @@ import SwiftUI
 struct CarrierLockAboutView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var service = CarrierService.shared
-    @State private var showsResetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -27,7 +26,7 @@ struct CarrierLockAboutView: View {
 
                 Section("简介") {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("CarrierLock 通过 Airlift 将运营商配置的符号链接写入 Overlay 目录，让 CommCenter 直接命中本地配置，减少卡贴日常使用中的跳激活。")
+                        Text("CarrierLock 的作用很简单：把你的 SIM 和某个运营商配置“绑定”起来。锁定后，系统重启、基带复位或卡贴重新注册时，不需要再反复猜该用哪个配置，从而减少跳激活。")
                         Text("支持系统：\(SystemCompatibility.supportedRangeDescription)")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -36,8 +35,8 @@ struct CarrierLockAboutView: View {
 
                 Section("跳激活的原因") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("卡贴会修改或伪装 SIM 上报给系统的网络标识。CommCenter 在重启、基带复位或 SIM 重新注册后，需要根据 IMSI/ICCID 重新选择运营商配置；当匹配结果不稳定或需要重新走激活流程时，系统会弹出“需要激活”。")
-                        Text("夜间待机、长时间充电、Wi-Fi 环境下更容易发生，是因为系统会进行维护任务、网络切换或基带复位，从而触发重新匹配。")
+                        Text("卡贴会把自己伪装成某种运营商信息。手机重启、基带复位或 SIM 重新注册后，系统会重新判断该用哪个运营商配置。这个判断一旦不稳定，系统就可能要求重新激活。")
+                        Text("晚上待机、长时间插着充电、Wi-Fi 环境下更容易发生，因为这时系统常做维护、切网或复位基带，容易触发重新匹配。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -45,8 +44,8 @@ struct CarrierLockAboutView: View {
 
                 Section("锁定 IPCC 的目的") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("锁定是在 Overlay 中为指定 IMSI 建立到系统运营商配置的链接。匹配成功后，CommCenter 优先使用本地 Overlay 配置，减少联网匹配。")
-                        Text("适合用于减少卡贴日常使用、重启、基带复位后的跳激活。")
+                        Text("锁定时会为你的 IMSI 创建一个指向运营商配置的链接。写入前会先备份，写入后会再读一遍确认结果，最后让系统重新确认实际使用的配置。")
+                        Text("主要用来减少卡贴日常使用、重启、基带复位后的跳激活。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -72,8 +71,6 @@ struct CarrierLockAboutView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-
-                resetCarrierCard
 
                 Section("运行日志") {
                     Label("日志包含配对、回环连接和 AirLift 文件操作。", systemImage: "list.bullet.rectangle")
@@ -101,18 +98,6 @@ struct CarrierLockAboutView: View {
             }
             .navigationTitle("软件介绍")
             .navigationBarTitleDisplayMode(.inline)
-            .confirmationDialog(
-                "确认重置运营商配置？",
-                isPresented: $showsResetConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("删除整个用户态 Carrier 目录", role: .destructive) {
-                    Task { await service.resetCarrierConfiguration() }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("此操作只清空 /var/mobile/Library/Carrier Bundles/iPhone，不会修改 /System/Library/Carrier Bundles。")
-            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
@@ -121,49 +106,6 @@ struct CarrierLockAboutView: View {
                 }
             }
         }
-    }
-
-    private var resetCarrierCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Label("重置运营商配置", systemImage: "exclamationmark.triangle.fill")
-                    .font(.headline)
-                    .foregroundStyle(.red)
-
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("清空用户态 Carrier Overlay，恢复系统默认配置")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("将删除用户态 Carrier Overlay 目录中的全部项目，让 CommCenter 回退到系统自带运营商配置。不会修改系统只读分区，也不会删除系统运营商 Bundle。删除后可重新初始化，或插入 SIM 让系统重新生成 Overlay 目录。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemGroupedBackground), in: .rect(cornerRadius: 12))
-
-            Button(role: .destructive) {
-                showsResetConfirmation = true
-            } label: {
-                Label("重置运营商配置", systemImage: "trash.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .disabled(service.mode == .locking || service.isCheckingStatus)
-
-            if let message = service.verifyMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
     }
 
     private var versionText: String {

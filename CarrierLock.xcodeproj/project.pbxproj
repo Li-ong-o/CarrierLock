@@ -290,11 +290,16 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.6;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
-					"-Wl,-u,_al_exploit_write_dir",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-liconv",
+					"-Wl,-u,_cs_execute",
+					"-Wl,-u,_al_pairing_run_host",
 					"-Wl,-u,_al_string_free",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.carrier.lock;
@@ -345,11 +350,16 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.5;
+				MARKETING_VERSION = 1.0.6;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lc++",
-					"-Wl,-u,_al_exploit_write_dir",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-liconv",
+					"-Wl,-u,_cs_execute",
+					"-Wl,-u,_al_pairing_run_host",
 					"-Wl,-u,_al_string_free",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.carrier.lock;

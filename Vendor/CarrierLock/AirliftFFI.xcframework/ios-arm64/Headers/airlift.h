@@ -89,6 +89,19 @@ int32_t al_exploit_run(const char *pairing_path,
                         char **out_json,
                         char **out_error);
 
+// Run one bounded, journaled CarrierSIM carrier-catalogue transaction.
+// Actions: "status", "apply", "restore", "recover".
+// Returns 0 for verified/read-only success, 2 when the catalogue was written
+// and verified but CommCenter confirmation is still pending, 1 on error.
+int32_t cs_execute(const char *pairing_path,
+                    const char *work_dir,
+                    const char *assets_zip,
+                    const char *request_json,
+                    ALLogCallback log_cb,
+                    void *ctx,
+                    char **result_json,
+                    char **out_error);
+
 // Read one absolute iOS file through the AirTraffic exploit.
 // `out_data` is heap-allocated and must be released with al_bytes_free(out_data, out_len).
 int32_t al_exploit_read_file(const char *pairing_path,

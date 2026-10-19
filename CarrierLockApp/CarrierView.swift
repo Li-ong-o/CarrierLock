@@ -2,11 +2,9 @@ import SwiftUI
 
 struct CarrierLockRootView: View {
     @StateObject private var service = CarrierService.shared
-    @ObservedObject private var monitor = CarrierMonitor.shared
     @State private var showingAbout = false
     @State private var showingAirliftSetup = false
-    @State private var showingBundlePicker = false
-    @State private var editingIMSI: String?
+    @State private var showingBundlePickerForSlot: String?
     @State private var showingStartupGate = true
     @State private var confirmingLock = false
 
@@ -23,15 +21,16 @@ struct CarrierLockRootView: View {
 
                     if service.needsAirliftSetup {
                         airliftSetupCard
+                    } else {
+                        selectionCard
+
+                        if service.needsRecovery {
+                            recoveryCard
+                        }
+
+                        actionButtons
                     }
 
-                    if !service.selectedIMSIs.isEmpty {
-                        lockForm
-                    }
-                    lockButton
-                    restoreButton
-                    verifyButton
-                    CarrierMonitorView()
                     details
                 }
                 .padding(20)
@@ -39,17 +38,6 @@ struct CarrierLockRootView: View {
             .background(Color(.systemGroupedBackground))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if monitor.state == .listening || monitor.state == .starting {
-                        Button {
-                            CarrierMonitor.shared.stop()
-                        } label: {
-                            Label("停止监听", systemImage: "stop.circle.fill")
-                        }
-                        .foregroundStyle(.red)
-                    }
-                }
-
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingAbout = true
@@ -63,25 +51,21 @@ struct CarrierLockRootView: View {
         .sheet(isPresented: $showingAbout) {
             CarrierLockAboutView()
         }
-        .sheet(isPresented: $showingAirliftSetup, onDismiss: {
-            Task { await startLockFlow() }
-        }) {
+        .sheet(isPresented: $showingAirliftSetup) {
             CarrierLockAirliftSetupView()
         }
-        .sheet(isPresented: $showingBundlePicker) {
+        .sheet(item: Binding(
+            get: { showingBundlePickerForSlot.map(SlotPickerTarget.init) },
+            set: { showingBundlePickerForSlot = $0?.slot }
+        )) { target in
             CarrierBundlePickerSheet(
+                slot: target.slot,
                 bundleName: Binding(
-                    get: {
-                        guard let imsi = editingIMSI else { return service.bundleName }
-                        return service.bundle(forIMSI: imsi)
-                    },
-                    set: { value in
-                        guard let imsi = editingIMSI else { return }
-                        service.customBundlesByIMSI[imsi] = value
-                    }
+                    get: { service.bundle(for: target.slot) },
+                    set: { service.setBundle($0, for: target.slot) }
                 )
             )
-                .presentationDetents([.large])
+            .presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
             CarrierStartupGateView(onContinue: {
@@ -92,7 +76,7 @@ struct CarrierLockRootView: View {
             })
         }
         .alert(
-            "Operation Failed",
+            "操作失败",
             isPresented: Binding(
                 get: {
                     if case .failed = service.mode { return true }
@@ -105,7 +89,7 @@ struct CarrierLockRootView: View {
                 }
             )
         ) {
-            Button("OK") {
+            Button("好") {
                 service.dismissFailure()
             }
         } message: {
@@ -114,16 +98,21 @@ struct CarrierLockRootView: View {
             }
         }
         .confirmationDialog(
-            "确认 IMSI 是否为本机号码",
+            "确认锁定运营商配置？",
             isPresented: $confirmingLock,
             titleVisibility: .visible
         ) {
             Button("已核对，继续锁定", role: .destructive) {
-                Task { await service.lock() }
+                Task { await service.apply() }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("请先与电脑核对 IMSI 是否为本机 SIM 的 IMSI。如果误锁成卡贴伪装 IMSI，运营商配置会持续匹配到错误目标，可能导致信号不稳定、功能异常或反复触发激活。")
+            Text("将为 \(service.selectedSims.map(\.displaySlot).joined(separator: "、")) 分别写入对应的运营商配置。请确认每个 SIM 的配置正确；CarrierSIM 会在写入前再次校验设备和 SIM 绑定。")
+        }
+        .task {
+            if !service.needsAirliftSetup {
+                await service.ensureInitialStatus()
+            }
         }
     }
 
@@ -149,127 +138,216 @@ struct CarrierLockRootView: View {
     }
 
     private var statusCard: some View {
-        HStack(spacing: 16) {
-            Image(systemName: statusSymbol)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 48, height: 48)
-                .background(statusColor.opacity(0.12), in: .circle)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                Image(systemName: statusSymbol)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(statusColor)
+                    .frame(width: 48, height: 48)
+                    .background(statusColor.opacity(0.12), in: .circle)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(statusTitle)
-                    .font(.headline)
-                Text(statusDetail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(statusTitle)
+                        .font(.headline)
+                    Text(statusDetail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-            if isBusy {
-                ProgressView()
-            }
-        }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
-    }
-
-    private var lockForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("已选 IMSI", systemImage: "checkmark.circle")
-                    .font(.headline)
-
-                ForEach(service.selectedIMSIs, id: \.self) { imsi in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(imsi)
-                                .font(.callout.monospaced())
-                            Text(service.bundle(forIMSI: imsi))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button {
-                            editingIMSI = imsi
-                            showingBundlePicker = true
-                        } label: {
-                            Text("修改")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                if service.isWorking {
+                    ProgressView()
                 }
             }
 
-            Text("每个 IMSI 会按 PLMN 自动匹配对应 bundle；无法识别或特殊场景可使用自定义 bundle 覆盖。")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if !service.extraIMSILinks.isEmpty {
+                let names = service.extraIMSILinks.map(\.imsi).joined(separator: "、")
+                Label("检测到多余 IMSI 链接：\(names)。请点击“恢复”清理。", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 8))
+            }
         }
         .padding(16)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
     }
 
-    private var lockButton: some View {
-        Button {
-            Task { await startLockFlow() }
-        } label: {
-            Label("锁定运营商配置", systemImage: "lock.fill")
-                .frame(maxWidth: .infinity)
+    private var selectionCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("SIM 卡槽", systemImage: "square.grid.2x2")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                slotButton("kOne")
+                slotButton("kTwo")
+            }
+
+            if service.sims.isEmpty {
+                Text("尚未读取 SIM 信息。请先点击“检查状态”。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(service.sims) { sim in
+                    slotInfo(for: sim)
+                }
+            }
+
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled(isBusy || !hasLockableIMSI)
-    }
-    private var restoreButton: some View {
-        Button(role: .destructive) {
-            Task { await service.restore() }
-        } label: {
-            Label("恢复", systemImage: "arrow.uturn.backward")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .disabled(isBusy)
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
     }
 
-    private var verifyButton: some View {
+    private func slotInfo(for sim: CarrierSIMInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let lockedBundle = service.imsiLinks
+                .first { $0.imsi == sim.imsi }?
+                .bundle
+            let isLocked = lockedBundle != nil
+            let suggestedBundle = service.suggestedBundle(for: sim)
+            let displayedBundle = lockedBundle
+                ?? suggestedBundle
+                ?? service.bundle(for: sim.slot)
+
+            HStack {
+                Text(sim.displaySlot)
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer()
+
+                if service.imsiLinks.contains(where: { $0.imsi == sim.imsi }) {
+                    Label("已锁定", systemImage: "lock.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
+
+            }
+
+            HStack(spacing: 8) {
+                Text("IMSI")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(sim.maskedIMSI)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+            }
+
+            if !sim.carrier.isEmpty {
+                let version = sim.version.isEmpty ? nil : sim.version
+                Text([sim.displayCarrier, version].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                Text(displayedBundle)
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+
+                if !isLocked && suggestedBundle != nil {
+                    Label("自动", systemImage: "wand.and.stars")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Button("选择") {
+                    showingBundlePickerForSlot = sim.slot
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGroupedBackground), in: .rect(cornerRadius: 8))
+    }
+
+    private func slotButton(_ slot: String) -> some View {
+        let available = service.availableSlots.contains(slot)
+        let selected = service.selectedSlots.contains(slot)
+
+        return Button {
+            guard available else { return }
+            if selected {
+                service.selectedSlots.remove(slot)
+            } else {
+                service.selectedSlots.insert(slot)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? Color.teal : .secondary)
+                Text(slotDisplayName(slot))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!available || service.isWorking)
+        .opacity(available ? 1 : 0.45)
+    }
+
+    private var recoveryCard: some View {
+        Label {
+            Text("CarrierSIM 检测到未完成操作。系统已保留可恢复的目录快照和日志。")
+                .font(.subheadline)
+        } icon: {
+            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                .foregroundStyle(.red)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.red.opacity(0.12), in: .rect(cornerRadius: 8))
+    }
+
+    private var actionButtons: some View {
         VStack(spacing: 12) {
             Button {
-                Task { await service.checkLockStatus() }
+                Task { await service.refreshStatus() }
             } label: {
-                Label("检查锁定状态", systemImage: "checkmark.shield")
+                Label("检查状态", systemImage: "checkmark.shield")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(isBusy)
+            .disabled(service.isWorking)
 
-            if !service.verifiedLinks.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(service.verifiedLinks.keys.sorted(), id: \.self) { imsi in
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.teal)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(imsi)
-                                    .font(.callout.monospaced())
-                                Text(service.verifiedLinks[imsi] ?? "未知目标")
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("已锁定")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.teal)
-                        }
-                    }
-                }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 8))
+            Button {
+                confirmingLock = true
+            } label: {
+                Label("锁定运营商配置", systemImage: "lock.fill")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!service.canApply)
 
+            Button(role: .destructive) {
+                Task { await service.restore() }
+            } label: {
+                Label("恢复", systemImage: "arrow.uturn.backward")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(service.isWorking)
+
+            Button {
+                Task { await service.recover() }
+            } label: {
+                Label("恢复未完成操作", systemImage: "arrow.triangle.2.circlepath")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(service.isWorking)
         }
     }
 
@@ -292,7 +370,7 @@ struct CarrierLockRootView: View {
             Label("需要完成连接引导", systemImage: "link.badge.plus")
                 .font(.headline)
 
-            Text("请先完成 iPhone 配对并连接 LocalDevVPN，CarrierLock 才能写入 Overlay 链接。")
+            Text("请先完成 iPhone 配对并连接 LocalDevVPN，CarrierLock 才能读取设备状态和写入 Overlay 链接。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -312,8 +390,8 @@ struct CarrierLockRootView: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Bundle 名称必须对应系统运营商配置目录下的文件夹。", systemImage: "folder.badge.gearshape")
-            Label("IMSI 符号链接会写入 Overlay 目录。", systemImage: "externaldrive.badge.timemachine")
-            Label("更换 SIM 后 IMSI 改变，原链接会失效；请先恢复默认，再重新锁定。", systemImage: "simcard")
+            Label("CarrierSIM 会把 15 位 IMSI 作为符号链接写入 Overlay 目录。", systemImage: "externaldrive.badge.timemachine")
+            Label("更换 SIM 后 IMSI 改变，原链接会失效；请先恢复，再重新锁定。", systemImage: "simcard")
             Label("本应用依赖非公开系统行为，请谨慎使用。", systemImage: "exclamationmark.triangle")
         }
         .font(.footnote)
@@ -321,113 +399,112 @@ struct CarrierLockRootView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var isBusy: Bool {
-        if case .locking = service.mode { return true }
-        if service.busyMessage != nil { return true }
-        return false
-    }
-
-    private var hasLockableIMSI: Bool {
-        guard !service.selectedIMSIs.isEmpty else { return false }
-        return service.selectedIMSIs.allSatisfy {
-            $0.count == 15 && $0.allSatisfy(\.isNumber)
+    private var statusTitle: String {
+        if service.errorMessage != nil {
+            return "检查失败（如果配对完成请重启软件）"
         }
-    }
-
-    private func startLockFlow() async {
-        guard hasLockableIMSI else { return }
-        confirmingLock = true
-    }
-
-    private var modeTitle: String {
-        switch service.mode {
-        case .idle: "未锁定"
-        case .locking: "锁定中…"
-        case .locked(let links): "Locked: \(links.count) IMSI"
-        case .failed: "失败"
+        if service.mode == .locking {
+            return "正在锁定"
         }
-    }
-
-    private var modeDetail: String {
-        switch service.mode {
-        case .idle:
-            service.selectedIMSIs.isEmpty
-                ? "尚未选择 IMSI，请先开始监听并开关飞行模式。"
-                : "已选择 \(service.selectedIMSIs.count) 个 IMSI，确认后可锁定。"
-        case .locking:
-            "正在写入运营商配置链接。"
-        case .locked:
-            "上次写入已生效。请勿把它当作当前选择。"
-        case .failed:
-            "上次操作失败，请检查错误后重试。"
+        if service.needsRecovery {
+            return "需要恢复"
         }
+        if service.isAfterSuccessfulApply {
+            return "已锁定"
+        }
+        if let result = service.latestResult, result.isFullyVerified {
+            return "已确认"
+        }
+        if service.allSelectedSimsLocked {
+            return "已锁定"
+        }
+        if service.hasLoadedStatus, service.latestResult?.canApply == true {
+            return "可以锁定"
+        }
+        if service.isWorking {
+            return "正在处理"
+        }
+        return "等待检查"
     }
 
     private var statusDetail: String {
-        if let verifyMessage = service.verifyMessage {
-            return verifyMessage
+        if let errorMessage = service.errorMessage {
+            return errorMessage
         }
-        return modeDetail
-    }
-
-    private var statusTitle: String {
-        guard let verifyMessage = service.verifyMessage else {
-            return modeTitle
+        if let statusMessage = service.statusMessage {
+            return statusMessage
         }
-        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
-            return String(localized: "检查失败")
+        if service.needsRecovery {
+            return "请先恢复上次未完成操作，再尝试锁定。"
         }
-        return service.verifiedLinks.isEmpty
-            ? String(localized: "未锁定")
-            : String(localized: "已锁定")
-    }
-
-    private var modeSymbol: String {
-        switch service.mode {
-        case .idle: "lock.open"
-        case .locking: "hourglass"
-        case .locked: "lock.fill"
-        case .failed: "exclamationmark.triangle.fill"
+        if !service.hasLoadedStatus {
+            return "请先检查设备状态。"
         }
+        return "已选择 \(service.sortedSlots.map(slotDisplayName).joined(separator: "、"))。"
     }
 
     private var statusSymbol: String {
-        guard let verifyMessage = service.verifyMessage else {
-            return modeSymbol
-        }
-        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
+        if service.errorMessage != nil {
             return "exclamationmark.triangle.fill"
         }
-        return service.verifiedLinks.isEmpty ? "lock.open" : "lock.fill"
-    }
-
-    private var modeColor: Color {
-        switch service.mode {
-        case .idle: .secondary
-        case .locking: .blue
-        case .locked: .teal
-        case .failed: .red
+        if service.mode == .locking {
+            return "lock.fill"
         }
+        if service.needsRecovery {
+            return "arrow.triangle.2.circlepath"
+        }
+        if service.isAfterSuccessfulApply {
+            return "lock.fill"
+        }
+        if service.latestResult?.isFullyVerified == true {
+            return "lock.fill"
+        }
+        if service.allSelectedSimsLocked {
+            return "lock.fill"
+        }
+        if service.isWorking {
+            return "hourglass"
+        }
+        if service.hasLoadedStatus, service.latestResult?.canApply == true {
+            return "checkmark.circle.fill"
+        }
+        return "lock.open"
     }
 
     private var statusColor: Color {
-        guard let verifyMessage = service.verifyMessage else {
-            return modeColor
-        }
-        if verifyMessage.hasPrefix(String(localized: "检查失败：")) {
+        if service.errorMessage != nil {
             return .red
         }
-        return service.verifiedLinks.isEmpty ? .secondary : .teal
+        if service.mode == .locking {
+            return .teal
+        }
+        if service.needsRecovery {
+            return .orange
+        }
+        if service.isAfterSuccessfulApply {
+            return .teal
+        }
+        if service.latestResult?.isFullyVerified == true {
+            return .teal
+        }
+        if service.allSelectedSimsLocked {
+            return .teal
+        }
+        if service.isWorking {
+            return .blue
+        }
+        if service.hasLoadedStatus, service.latestResult?.canApply == true {
+            return .green
+        }
+        return .secondary
     }
 
-    private var imsiDetail: String {
-        if case .locked(let links) = service.mode {
-            return links
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key) → \($0.value)" }
-                .joined(separator: "、")
+    private func slotDisplayName(_ slot: String) -> String {
+        switch slot {
+        case "kOne": "SIM 1"
+        case "kTwo": "SIM 2"
+        default: slot
         }
-        return ""
     }
 }
 
@@ -435,8 +512,15 @@ struct CarrierLockRootView: View {
     CarrierLockRootView()
 }
 
+private struct SlotPickerTarget: Identifiable {
+    let slot: String
+    var id: String { slot }
+}
+
 private struct CarrierBundlePickerSheet: View {
+    let slot: String
     @Binding var bundleName: String
+    @ObservedObject private var service = CarrierService.shared
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var customMode = false
@@ -458,6 +542,29 @@ private struct CarrierBundlePickerSheet: View {
                 }
 
                 Section {
+                    Button {
+                        if let sim = service.sims.first(where: { $0.slot == slot }),
+                           service.autoMatchBundle(for: sim) {
+                            dismiss()
+                        }
+                    } label: {
+                        HStack {
+                            Label("自动匹配", systemImage: "wand.and.stars")
+                            Spacer()
+                            if let sim = service.sims.first(where: { $0.slot == slot }),
+                               let suggested = service.suggestedBundle(for: sim) {
+                                Text(suggested)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("暂无")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(service.sims.first { $0.slot == slot }.flatMap(service.suggestedBundle(for:)) == nil)
+
                     Button {
                         customMode = true
                     } label: {

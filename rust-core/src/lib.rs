@@ -9,6 +9,11 @@
 
 use std::ffi::{c_char, c_void};
 
+pub mod carrier;
+pub mod carrier_data;
+pub mod carrier_recovery;
+pub mod carrier_trigger;
+pub mod device_target;
 pub mod exploit;
 pub mod ffi_util;
 pub mod grappa;
@@ -21,6 +26,35 @@ pub mod pairing;
 extern crate idevice_ffi;
 
 pub use pairing::{ALPairPinCb, ALPairReadyCb, ALPairResult};
+
+/// Run a bounded, journaled CarrierSIM carrier-catalogue transaction.
+///
+/// Actions: `status`, `apply`, `restore`, `recover`.
+///
+/// # Safety
+/// All pointer arguments must be null or valid C strings/output slots.
+#[no_mangle]
+pub unsafe extern "C" fn cs_execute(
+    pairing_path: *const c_char,
+    work_dir: *const c_char,
+    assets_zip: *const c_char,
+    request_json: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    result_json: *mut *mut c_char,
+    error: *mut *mut c_char,
+) -> i32 {
+    carrier::run(
+        pairing_path,
+        work_dir,
+        assets_zip,
+        request_json,
+        log_cb,
+        ctx,
+        result_json,
+        error,
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Logging
