@@ -127,9 +127,9 @@ struct CarrierLockRootView: View {
                     .foregroundStyle(.white)
             }
 
-            Text("锁定 IPCC")
+            Text("CarrierLock")
                 .font(.title2.bold())
-            Text("固定 SIM 对应的运营商配置，减少卡贴日常使用中的跳激活。")
+            Text("锁定运营商配置 Bundle，减少重启或基带复位后的配置漂移。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

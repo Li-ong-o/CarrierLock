@@ -26,7 +26,7 @@ struct CarrierLockAboutView: View {
 
                 Section("简介") {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("CarrierLock 的作用很简单：把你的 SIM 和某个运营商配置“绑定”起来。锁定后，系统重启、基带复位或卡贴重新注册时，不需要再反复猜该用哪个配置，从而减少跳激活。")
+                        Text("CarrierLock 的作用很简单：把你的 SIM IMSI 和某个运营商配置 Bundle“绑定”起来。锁定后，系统重启、基带复位或卡贴重新注册时，不需要反复猜该用哪个配置，从而减少配置漂移和跳激活。")
                         Text("支持系统：\(SystemCompatibility.supportedRangeDescription)")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -42,10 +42,10 @@ struct CarrierLockAboutView: View {
                     }
                 }
 
-                Section("锁定 IPCC 的目的") {
+                Section("锁定运营商 Bundle 的目的") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("锁定时会为你的 IMSI 创建一个指向运营商配置的链接。写入前会先备份，写入后会再读一遍确认结果，最后让系统重新确认实际使用的配置。")
-                        Text("主要用来减少卡贴日常使用、重启、基带复位后的跳激活。")
+                        Text("锁定时会为你的 IMSI 创建一个指向运营商配置 Bundle 的链接。写入前会先备份，写入后会回读确认链接已经存在。")
+                        Text("它主要让配置选择更稳定：重启、基带复位、卡贴重新注册后，减少 CommCenter 反复匹配带来的配置漂移。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
