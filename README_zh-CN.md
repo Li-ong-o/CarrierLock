@@ -5,6 +5,27 @@
 CarrierLock 是一款面向个人设备维护场景的 iOS 工具。它通过 Airlift 为指定 IMSI 写入运营商配置 Overlay 链接，让 CommCenter 优先命中本地 carrier bundle，减少卡贴场景下的重复配置匹配和跳激活。
 
 
+## 配套软件与配对
+
+CarrierLock 需要先完成设备配对，才能建立 Airlift 连接。请根据 iOS 版本选择对应方式。
+
+### 📱 iOS 27：纯手机端使用，无需电脑
+
+1. 使用证书安装 CarrierLock。
+2. 从 App Store 安装 [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044)。
+3. 打开 **系统设置 → 隐私与安全 → 开发者模式 → 配对设备**，选择 CarrierLock。
+4. 从 CarrierLock 获取配对密码并输入，完成配对。
+5. 保持 **Wi-Fi** 和 **LocalDevVPN** 开启，再打开 CarrierLock 即可使用。
+
+### 🍎 iOS 18–26：需要电脑配对
+
+1. 在电脑上下载 [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases)。
+2. 插入 iPhone，解锁并点击 **信任**。
+3. 生成 **RPPairing 文件**。
+   - 注意：不要选择锁定的配对文件，也不要使用 SideStore 的 `.mobiledevicepairing` 文件。
+4. 通过 **隔空投送 / 分享**，在 CarrierLock 中打开并导入；也可以复制文件内容后，在 CarrierLock 中通过 **从剪贴板粘贴** 导入。
+
+
 ## 功能特性
 
 - 提供配对文件与 LocalDevVPN 回环连接的设备端引导。
@@ -24,6 +45,9 @@ CarrierLock 会通过 Airlift 写入形如 `<IMSI> -> /System/Library/Carrier Bu
 
 - 一台受支持的 iOS/iPadOS 系统的实体 iPhone 或 iPad：
   - **iOS/iPadOS 18.0 – 27.2 B2**
+- 配对方式：
+  - **iOS 27**：可在手机端配合 [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044) 完成配对，无需电脑。
+  - **iOS 18–26**：需要使用电脑通过 [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases) 生成 RPPairing 文件并导入。
 - 本地构建需 Xcode 27 或更高版本。
 - 仓库提供的 GitHub Actions 工作流可在云端构建 unsigned IPA。
 
