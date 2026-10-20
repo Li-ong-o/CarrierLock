@@ -35,54 +35,39 @@ final class CarrierService: ObservableObject {
         }
     }
 
-    @Published var bundleName: String {
-        didSet {
-            UserDefaults.standard.set(bundleName, forKey: Self.bundleNameKey)
-        }
-    }
-
     @Published var bundleBySlot: [String: String] {
         didSet {
             UserDefaults.standard.set(bundleBySlot, forKey: Self.bundleBySlotKey)
-            if oldValue.count != bundleBySlot.count {
-                return
-            }
-
-            var changedSlots = Set(oldValue.keys).intersection(bundleBySlot.keys)
-            changedSlots = changedSlots.filter { oldValue[$0] != bundleBySlot[$0] }
-
-            for slot in changedSlots {
-                automaticBundleSlots.remove(slot)
-            }
         }
     }
 
     @Published private(set) var automaticBundleSlots: Set<String> = []
-
-    private var hasAutoSelectedBundles = false {
-        didSet {
-            UserDefaults.standard.set(hasAutoSelectedBundles, forKey: Self.hasAutoSelectedBundlesKey)
-        }
-    }
+    @Published private(set) var manualBundleIMSIs: Set<String> = []
 
     private let transport = CarrierSIMTransport.shared
     private static let selectedSlotsKey = "carrierlock.selectedSlots"
-    private static let bundleNameKey = "carrierlock.bundleName"
     private static let bundleBySlotKey = "carrierlock.bundleBySlot"
-    private static let hasAutoSelectedBundlesKey = "carrierlock.hasAutoSelectedBundles"
+    private static let automaticBundleSlotsKey = "carrierlock.automaticBundleSlots"
+    private static let manualBundleIMSIsKey = "carrierlock.manualBundleIMSIs"
+    private static let legacyManualBundleSlotsKey = "carrierlock.manualBundleSlots"
 
     init() {
         let savedSlots = UserDefaults.standard.stringArray(forKey: Self.selectedSlotsKey) ?? ["kOne", "kTwo"]
         let initialSlots = Set(savedSlots.filter { $0 == "kOne" || $0 == "kTwo" })
         self.selectedSlots = initialSlots.isEmpty ? ["kOne", "kTwo"] : initialSlots
         let savedBundles = UserDefaults.standard.dictionary(forKey: Self.bundleBySlotKey) as? [String: String] ?? [:]
-        let initialBundle = UserDefaults.standard.string(forKey: Self.bundleNameKey) ?? "CMCC_cn"
-        self.bundleName = initialBundle
         self.bundleBySlot = [
-            "kOne": savedBundles["kOne"] ?? initialBundle,
-            "kTwo": savedBundles["kTwo"] ?? initialBundle,
+            "kOne": savedBundles["kOne"] ?? "CMCC_cn",
+            "kTwo": savedBundles["kTwo"] ?? "CMCC_cn",
         ]
-        self.hasAutoSelectedBundles = UserDefaults.standard.bool(forKey: Self.hasAutoSelectedBundlesKey)
+        self.automaticBundleSlots = Set(
+            UserDefaults.standard.stringArray(forKey: Self.automaticBundleSlotsKey)?
+                .filter { $0 == "kOne" || $0 == "kTwo" } ?? []
+        )
+        self.manualBundleIMSIs = Set(
+            UserDefaults.standard.stringArray(forKey: Self.manualBundleIMSIsKey)?
+                .filter { $0.count == 15 && $0.allSatisfy(\.isNumber) } ?? []
+        )
     }
 
     var sortedSlots: [String] {
@@ -119,7 +104,7 @@ final class CarrierService: ObservableObject {
     }
 
     func bundle(for slot: String) -> String {
-        bundleBySlot[slot] ?? bundleName
+        bundleBySlot[slot] ?? "CMCC_cn"
     }
 
     func isAutomaticBundle(for slot: String) -> Bool {
@@ -133,12 +118,16 @@ final class CarrierService: ObservableObject {
     func autoMatchBundle(for sim: CarrierSIMInfo) -> Bool {
         guard let suggested = suggestedBundle(for: sim) else { return false }
         bundleBySlot[sim.slot] = suggested
+        manualBundleIMSIs.remove(sim.imsi)
         automaticBundleSlots.insert(sim.slot)
         return true
     }
 
     func setBundle(_ bundle: String, for slot: String) {
         bundleBySlot[slot] = bundle
+        if let sim = sims.first(where: { $0.slot == slot }) {
+            manualBundleIMSIs.insert(sim.imsi)
+        }
         automaticBundleSlots.remove(slot)
     }
 
@@ -177,19 +166,19 @@ final class CarrierService: ObservableObject {
             var result = try await transport.execute(
                 action: .status,
                 slots: sortedSlots,
-                bundle: bundleName
+                bundle: bundle(for: sortedSlots.first ?? "kOne")
             )
 
             if result.isFailure, sortedSlots.count == 2 {
                 let one = try await transport.execute(
                     action: .status,
                     slots: ["kOne"],
-                    bundle: bundleName
+                    bundle: bundle(for: "kOne")
                 )
                 let two = try await transport.execute(
                     action: .status,
                     slots: ["kTwo"],
-                    bundle: bundleName
+                    bundle: bundle(for: "kTwo")
                 )
 
                 if !one.isFailure || !two.isFailure {
@@ -241,7 +230,7 @@ final class CarrierService: ObservableObject {
             let result = try await transport.execute(
                 action: action,
                 slots: sortedSlots,
-                bundle: bundleName,
+                bundle: bundle(for: sortedSlots.first ?? "kOne"),
                 assignments: assignments
             )
             process(result, action: action)
@@ -291,7 +280,7 @@ final class CarrierService: ObservableObject {
         if action == .status {
             hasLoadedStatus = true
             reconcileSelectedSlots()
-            if !result.isFailure {
+            if !result.sims.isEmpty {
                 autoSelectBundlesFromPLMN()
             }
         }
@@ -338,17 +327,44 @@ final class CarrierService: ObservableObject {
     }
 
     private func autoSelectBundlesFromPLMN() {
-        guard !hasAutoSelectedBundles, !sims.isEmpty else { return }
-
         var selections = bundleBySlot
+        var automaticSlots = Set<String>()
+        migrateLegacyManualBundleSlotsIfNeeded()
         for sim in sims {
-            guard let suggested = Self.suggestedBundle(mcc: sim.mcc, mnc: sim.mnc) else { continue }
+            guard !manualBundleIMSIs.contains(sim.imsi) else { continue }
+            guard let suggested = Self.suggestedBundle(mcc: sim.mcc, mnc: sim.mnc) else {
+                automaticSlots.remove(sim.slot)
+                continue
+            }
             selections[sim.slot] = suggested
-            automaticBundleSlots.insert(sim.slot)
+            automaticSlots.insert(sim.slot)
         }
 
         bundleBySlot = selections
-        hasAutoSelectedBundles = true
+        automaticBundleSlots = automaticSlots
+        UserDefaults.standard.set(Array(automaticSlots), forKey: Self.automaticBundleSlotsKey)
+        persistManualBundleIMSIs()
+    }
+
+    /// Migration from the old slot-based manual selection. The first successful
+    /// status after update transfers the preference to the IMSI currently in
+    /// that slot, so changing the card later returns to automatic matching.
+    private func migrateLegacyManualBundleSlotsIfNeeded() {
+        let legacySlots = Set(
+            UserDefaults.standard.stringArray(forKey: Self.legacyManualBundleSlotsKey)?
+                .filter { $0 == "kOne" || $0 == "kTwo" } ?? []
+        )
+        guard !legacySlots.isEmpty else { return }
+
+        for sim in sims where legacySlots.contains(sim.slot) {
+            manualBundleIMSIs.insert(sim.imsi)
+        }
+        UserDefaults.standard.removeObject(forKey: Self.legacyManualBundleSlotsKey)
+        persistManualBundleIMSIs()
+    }
+
+    private func persistManualBundleIMSIs() {
+        UserDefaults.standard.set(Array(manualBundleIMSIs), forKey: Self.manualBundleIMSIsKey)
     }
 
     private static func mergeStatusResults(_ one: CarrierSIMResult, _ two: CarrierSIMResult) -> CarrierSIMResult {

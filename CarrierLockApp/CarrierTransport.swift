@@ -81,7 +81,7 @@ nonisolated struct CarrierSIMInfo: Sendable, Identifiable, Equatable {
         self.mnc = (json["mnc"] as? String) ?? ""
         self.imsi = (json["imsi"] as? String) ?? ""
         self.carrier = (json["carrier"] as? String) ?? ""
-        self.version = (json["version"] as? String) ?? ""
+        self.version = (json["carrier_version"] as? String) ?? (json["version"] as? String) ?? ""
     }
 }
 

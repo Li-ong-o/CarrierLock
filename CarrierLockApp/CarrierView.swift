@@ -208,10 +208,8 @@ struct CarrierLockRootView: View {
                 .first { $0.imsi == sim.imsi }?
                 .bundle
             let isLocked = lockedBundle != nil
-            let suggestedBundle = service.suggestedBundle(for: sim)
-            let displayedBundle = lockedBundle
-                ?? suggestedBundle
-                ?? service.bundle(for: sim.slot)
+            let selectedBundle = service.bundle(for: sim.slot)
+            let displayedBundle = lockedBundle ?? selectedBundle
 
             HStack {
                 Text(sim.displaySlot)
@@ -250,7 +248,7 @@ struct CarrierLockRootView: View {
                     .textSelection(.enabled)
                     .lineLimit(1)
 
-                if !isLocked && suggestedBundle != nil {
+                if !isLocked && service.isAutomaticBundle(for: sim.slot) {
                     Label("自动", systemImage: "wand.and.stars")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
