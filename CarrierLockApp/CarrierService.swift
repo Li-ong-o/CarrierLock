@@ -326,8 +326,10 @@ final class CarrierService: ObservableObject {
             self.device = device
         }
         if !result.sims.isEmpty {
-            sims = result.sims.sorted { $0.displaySlot < $1.displaySlot }
-            availableSlots = Set(result.sims.map(\.slot))
+            var seenSlots = Set<String>()
+            let uniqueSims = result.sims.filter { seenSlots.insert($0.slot).inserted }
+            sims = uniqueSims.sorted { $0.displaySlot < $1.displaySlot }
+            availableSlots = Set(uniqueSims.map(\.slot))
         }
         imsiLinks = result.imsiLinks
         extraIMSILinks = result.imsiLinks.filter { link in
@@ -452,7 +454,9 @@ final class CarrierService: ObservableObject {
 
     private static func mergeStatusResults(_ one: CarrierSIMResult, _ two: CarrierSIMResult) -> CarrierSIMResult {
         let deviceJSON = (one.device ?? two.device).map(deviceJSON(_:))
-        let simsJSON = (one.sims + two.sims)
+        var seenSlots = Set<String>()
+        let mergedSims = (one.sims + two.sims).filter { seenSlots.insert($0.slot).inserted }
+        let simsJSON = mergedSims
             .sorted { $0.displaySlot < $1.displaySlot }
             .map(simJSON(_:))
         let object: [String: Any] = [
