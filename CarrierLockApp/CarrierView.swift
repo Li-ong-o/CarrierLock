@@ -5,6 +5,7 @@ struct CarrierLockRootView: View {
     @State private var showingAbout = false
     @State private var showingAirliftSetup = false
     @State private var showingBundlePickerForSlot: String?
+    @State private var showingIMSIEditorForSlot: String?
     @State private var showingStartupGate = true
     @State private var confirmingLock = false
 
@@ -66,6 +67,13 @@ struct CarrierLockRootView: View {
                 )
             )
             .presentationDetents([.large])
+        }
+        .sheet(item: Binding(
+            get: { showingIMSIEditorForSlot.map(IMSIEditorTarget.init) },
+            set: { showingIMSIEditorForSlot = $0?.slot }
+        )) { target in
+            CarrierIMSIEditorSheet(slot: target.slot)
+                .presentationDetents([.medium])
         }
         .fullScreenCover(isPresented: $showingStartupGate) {
             CarrierStartupGateView(onContinue: {
@@ -204,8 +212,9 @@ struct CarrierLockRootView: View {
 
     private func slotInfo(for sim: CarrierSIMInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            let effectiveIMSI = service.effectiveIMSI(for: sim)
             let lockedBundle = service.imsiLinks
-                .first { $0.imsi == sim.imsi }?
+                .first { $0.imsi == effectiveIMSI }?
                 .bundle
             let isLocked = lockedBundle != nil
             let selectedBundle = service.bundle(for: sim.slot)
@@ -217,7 +226,7 @@ struct CarrierLockRootView: View {
 
                 Spacer()
 
-                if service.imsiLinks.contains(where: { $0.imsi == sim.imsi }) {
+                if service.imsiLinks.contains(where: { $0.imsi == effectiveIMSI }) {
                     Label("已锁定", systemImage: "lock.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.teal)
@@ -229,9 +238,24 @@ struct CarrierLockRootView: View {
                 Text("IMSI")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(sim.maskedIMSI)
+                Text(imsiDisplayText(for: sim))
                     .font(.callout.monospaced())
-                    .textSelection(.enabled)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 5) {
+                        if service.isIMSIRevealed(for: sim.slot) {
+                            showingIMSIEditorForSlot = sim.slot
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                service.toggleIMSIReveal(for: sim.slot)
+                            }
+                        }
+                    }
+
+                if service.hasIMSIOverride(for: sim.slot) {
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             if !sim.carrier.isEmpty {
@@ -266,6 +290,16 @@ struct CarrierLockRootView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemGroupedBackground), in: .rect(cornerRadius: 8))
+    }
+
+    private func imsiDisplayText(for sim: CarrierSIMInfo) -> String {
+        let imsi = service.effectiveIMSI(for: sim)
+        guard !service.isIMSIRevealed(for: sim.slot) else { return imsi }
+        let characters = Array(imsi)
+        guard characters.count >= 10 else { return imsi }
+        return String(characters.prefix(5))
+            + String(repeating: "*", count: 6)
+            + String(characters.suffix(4))
     }
 
     private func slotButton(_ slot: String) -> some View {
@@ -513,6 +547,72 @@ struct CarrierLockRootView: View {
 private struct SlotPickerTarget: Identifiable {
     let slot: String
     var id: String { slot }
+}
+
+private struct IMSIEditorTarget: Identifiable {
+    let slot: String
+    var id: String { slot }
+}
+
+private struct CarrierIMSIEditorSheet: View {
+    let slot: String
+    @ObservedObject private var service = CarrierService.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var imsi = ""
+
+    private var sim: CarrierSIMInfo? {
+        service.sims.first { $0.slot == slot }
+    }
+
+    private var isValid: Bool {
+        imsi.count == 15 && imsi.allSatisfy(\.isNumber)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("15 位 IMSI", text: $imsi)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .monospaced()
+                } footer: {
+                    if let sim {
+                        Text("当前读取到的 IMSI：\(sim.imsi)")
+                    }
+                }
+
+                Section {
+                    Button("保存") {
+                        guard let sim else { return }
+                        service.setIMSIOverride(imsi, for: sim)
+                        dismiss()
+                    }
+                    .disabled(!isValid)
+
+                    if let sim, service.hasIMSIOverride(for: slot) {
+                        Button("恢复为读取到的 IMSI", role: .destructive) {
+                            service.setIMSIOverride(sim.imsi, for: sim)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("编辑 IMSI")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear {
+                if let sim {
+                    imsi = service.effectiveIMSI(for: sim)
+                }
+            }
+        }
+    }
 }
 
 private struct CarrierBundlePickerSheet: View {

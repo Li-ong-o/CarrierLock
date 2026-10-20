@@ -43,6 +43,9 @@ final class CarrierService: ObservableObject {
 
     @Published private(set) var automaticBundleSlots: Set<String> = []
     @Published private(set) var manualBundleIMSIs: Set<String> = []
+    @Published private(set) var revealedIMSISlots: Set<String> = []
+    @Published private(set) var imsiOverrides: [String: String] = [:]
+    @Published private(set) var imsiOverrideSources: [String: String] = [:]
 
     private let transport = CarrierSIMTransport.shared
     private static let selectedSlotsKey = "carrierlock.selectedSlots"
@@ -50,6 +53,8 @@ final class CarrierService: ObservableObject {
     private static let automaticBundleSlotsKey = "carrierlock.automaticBundleSlots"
     private static let manualBundleIMSIsKey = "carrierlock.manualBundleIMSIs"
     private static let legacyManualBundleSlotsKey = "carrierlock.manualBundleSlots"
+    private static let imsiOverridesKey = "carrierlock.imsiOverrides"
+    private static let imsiOverrideSourcesKey = "carrierlock.imsiOverrideSources"
 
     init() {
         let savedSlots = UserDefaults.standard.stringArray(forKey: Self.selectedSlotsKey) ?? ["kOne", "kTwo"]
@@ -68,6 +73,8 @@ final class CarrierService: ObservableObject {
             UserDefaults.standard.stringArray(forKey: Self.manualBundleIMSIsKey)?
                 .filter { $0.count == 15 && $0.allSatisfy(\.isNumber) } ?? []
         )
+        self.imsiOverrides = UserDefaults.standard.dictionary(forKey: Self.imsiOverridesKey) as? [String: String] ?? [:]
+        self.imsiOverrideSources = UserDefaults.standard.dictionary(forKey: Self.imsiOverrideSourcesKey) as? [String: String] ?? [:]
     }
 
     var sortedSlots: [String] {
@@ -99,7 +106,7 @@ final class CarrierService: ObservableObject {
     var allSelectedSimsLocked: Bool {
         guard hasLoadedStatus, !selectedSims.isEmpty else { return false }
         return selectedSims.allSatisfy { sim in
-            imsiLinks.contains { $0.imsi == sim.imsi }
+            imsiLinks.contains { $0.imsi == effectiveIMSI(for: sim) }
         }
     }
 
@@ -118,7 +125,7 @@ final class CarrierService: ObservableObject {
     func autoMatchBundle(for sim: CarrierSIMInfo) -> Bool {
         guard let suggested = suggestedBundle(for: sim) else { return false }
         bundleBySlot[sim.slot] = suggested
-        manualBundleIMSIs.remove(sim.imsi)
+        manualBundleIMSIs.remove(effectiveIMSI(for: sim))
         automaticBundleSlots.insert(sim.slot)
         return true
     }
@@ -126,9 +133,59 @@ final class CarrierService: ObservableObject {
     func setBundle(_ bundle: String, for slot: String) {
         bundleBySlot[slot] = bundle
         if let sim = sims.first(where: { $0.slot == slot }) {
-            manualBundleIMSIs.insert(sim.imsi)
+            manualBundleIMSIs.insert(effectiveIMSI(for: sim))
         }
         automaticBundleSlots.remove(slot)
+    }
+
+    func isIMSIRevealed(for slot: String) -> Bool {
+        revealedIMSISlots.contains(slot)
+    }
+
+    func toggleIMSIReveal(for slot: String) {
+        if revealedIMSISlots.contains(slot) {
+            revealedIMSISlots.remove(slot)
+        } else {
+            revealedIMSISlots.insert(slot)
+        }
+    }
+
+    func hasIMSIOverride(for slot: String) -> Bool {
+        guard let sim = sims.first(where: { $0.slot == slot }) else { return false }
+        return effectiveIMSI(for: sim) != sim.imsi
+    }
+
+    func effectiveIMSI(for sim: CarrierSIMInfo) -> String {
+        guard let override = imsiOverrides[sim.slot],
+              imsiOverrideSources[sim.slot] == sim.imsi,
+              Self.isValidIMSI(override) else {
+            return sim.imsi
+        }
+        return override
+    }
+
+    func setIMSIOverride(_ imsi: String, for sim: CarrierSIMInfo) {
+        let normalized = imsi.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oldIMSI = effectiveIMSI(for: sim)
+
+        if normalized == sim.imsi || !Self.isValidIMSI(normalized) {
+            imsiOverrides.removeValue(forKey: sim.slot)
+            imsiOverrideSources.removeValue(forKey: sim.slot)
+            revealedIMSISlots.remove(sim.slot)
+        } else {
+            imsiOverrides[sim.slot] = normalized
+            imsiOverrideSources[sim.slot] = sim.imsi
+        }
+
+        if !automaticBundleSlots.contains(sim.slot), oldIMSI != normalized {
+            manualBundleIMSIs.remove(oldIMSI)
+            if Self.isValidIMSI(normalized) {
+                manualBundleIMSIs.insert(normalized)
+            }
+        }
+
+        persistIMSIOverrides()
+        persistManualBundleIMSIs()
     }
 
     static func suggestedBundle(mcc: String, mnc: String) -> String? {
@@ -223,7 +280,7 @@ final class CarrierService: ObservableObject {
             var assignments: [String: String] = [:]
             if action == .apply {
                 assignments = selectedSims.reduce(into: [:]) { result, sim in
-                    result[sim.imsi] = bundle(for: sim.slot)
+                    result[effectiveIMSI(for: sim)] = bundle(for: sim.slot)
                 }
             }
 
@@ -274,12 +331,13 @@ final class CarrierService: ObservableObject {
         }
         imsiLinks = result.imsiLinks
         extraIMSILinks = result.imsiLinks.filter { link in
-            !sims.contains { $0.imsi == link.imsi }
+            !sims.contains { effectiveIMSI(for: $0) == link.imsi }
         }
         needsRecovery = result.needsRecovery
         if action == .status {
             hasLoadedStatus = true
             reconcileSelectedSlots()
+            reconcileIMSIOverrides()
             if !result.sims.isEmpty {
                 autoSelectBundlesFromPLMN()
             }
@@ -331,7 +389,7 @@ final class CarrierService: ObservableObject {
         var automaticSlots = Set<String>()
         migrateLegacyManualBundleSlotsIfNeeded()
         for sim in sims {
-            guard !manualBundleIMSIs.contains(sim.imsi) else { continue }
+            guard !manualBundleIMSIs.contains(effectiveIMSI(for: sim)) else { continue }
             guard let suggested = Self.suggestedBundle(mcc: sim.mcc, mnc: sim.mnc) else {
                 automaticSlots.remove(sim.slot)
                 continue
@@ -357,7 +415,7 @@ final class CarrierService: ObservableObject {
         guard !legacySlots.isEmpty else { return }
 
         for sim in sims where legacySlots.contains(sim.slot) {
-            manualBundleIMSIs.insert(sim.imsi)
+            manualBundleIMSIs.insert(effectiveIMSI(for: sim))
         }
         UserDefaults.standard.removeObject(forKey: Self.legacyManualBundleSlotsKey)
         persistManualBundleIMSIs()
@@ -365,6 +423,31 @@ final class CarrierService: ObservableObject {
 
     private func persistManualBundleIMSIs() {
         UserDefaults.standard.set(Array(manualBundleIMSIs), forKey: Self.manualBundleIMSIsKey)
+    }
+
+    private func persistIMSIOverrides() {
+        UserDefaults.standard.set(imsiOverrides, forKey: Self.imsiOverridesKey)
+        UserDefaults.standard.set(imsiOverrideSources, forKey: Self.imsiOverrideSourcesKey)
+    }
+
+    private func reconcileIMSIOverrides() {
+        var changed = false
+        for (slot, source) in imsiOverrideSources {
+            guard let sim = sims.first(where: { $0.slot == slot }) else { continue }
+            if sim.imsi != source {
+                imsiOverrides.removeValue(forKey: slot)
+                imsiOverrideSources.removeValue(forKey: slot)
+                revealedIMSISlots.remove(slot)
+                changed = true
+            }
+        }
+        if changed {
+            persistIMSIOverrides()
+        }
+    }
+
+    private static func isValidIMSI(_ imsi: String) -> Bool {
+        imsi.count == 15 && imsi.allSatisfy(\.isNumber)
     }
 
     private static func mergeStatusResults(_ one: CarrierSIMResult, _ two: CarrierSIMResult) -> CarrierSIMResult {
@@ -449,7 +532,9 @@ final class CarrierService: ObservableObject {
 
     private func selectedStatusText(_ result: CarrierSIMResult) -> String {
         guard !sims.isEmpty else { return "" }
-        let lockedSims = sims.filter { sim in result.imsiLinks.contains { $0.imsi == sim.imsi } }
+        let lockedSims = sims.filter { sim in
+            result.imsiLinks.contains { $0.imsi == effectiveIMSI(for: sim) }
+        }
         if lockedSims.count == sims.count {
             return "已锁定。所有 SIM 的 IMSI 链接都已存在，无需重复写入。"
         }
