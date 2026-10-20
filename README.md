@@ -53,6 +53,12 @@ For an unsigned IPA, run the `Release unsigned IPA` workflow in GitHub Actions. 
 - [airlift](https://github.com/0xjohnnydev/airlift) by 0xjohnny for the AirTraffic and Airlock research retained in the project dependencies.
 - [Placard](https://github.com/frs0n/placard) contributors for the original iOS project structure and container-access implementation.
 
+## Appreciation
+
+If CarrierLock has been useful to you, you can support its continued maintenance with the QR code below.
+
+<img src="CarrierLockApp/Assets.xcassets/AppreciationQR.imageset/AppreciationQR.jpg" width="240" alt="Appreciation QR code" />
+
 ## License
 
 CarrierLock is released under the [GNU General Public License v3.0](LICENSE).

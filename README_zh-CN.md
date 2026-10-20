@@ -322,6 +322,12 @@ Airlift FFI 的 Rust 完整源码位于 [`rust-core/`](./rust-core/README.md)。
 - 感谢 [airlift](https://github.com/0xjohnnydev/airlift)（作者 0xjohnny）提供的 AirTraffic 与 Airlock 研究，其作为项目依赖被保留。
 - 感谢 [Placard](https://github.com/frs0n/placard) 的贡献者提供的原始 iOS 项目结构与容器访问实现。
 
+## 赞赏
+
+如果 CarrierLock 对你有所帮助，欢迎扫描下方赞赏码支持后续维护。
+
+<img src="CarrierLockApp/Assets.xcassets/AppreciationQR.imageset/AppreciationQR.jpg" width="240" alt="赞赏码" />
+
 ## 许可证 / License
 
 CarrierLock 以 [GNU 通用公共许可证 v3.0](LICENSE) 发布。
