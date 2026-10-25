@@ -1,3 +1,6 @@
+## 本人从未在飞机/闲鱼 及 其他平台售卖软件 开源软件免费使用 请擦亮眼睛别被骗了
+## 目前软件利用的漏洞权限不足 还锁定不了IPCC 卡贴机依旧会跳激活的 请等待后续更新
+
 # CarrierLock
 
 > 🌍 **Languages:** English | [简体中文 (Simplified Chinese)](./README_zh-CN.md)
